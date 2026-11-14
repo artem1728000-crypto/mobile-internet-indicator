@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' version '8.9.2' }
+android {
+    namespace 'ru.artemzozula.mobileindicator'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ru.artemzozula.mobileindicator'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('SIGNING_FILE') ?: 'missing.p12')
+            storePassword System.getenv('SIGNING_PASSWORD')
+            keyAlias 'mobile-indicator'
+            keyPassword System.getenv('SIGNING_PASSWORD')
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release } }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
