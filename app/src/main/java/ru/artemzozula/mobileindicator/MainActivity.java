@@ -123,7 +123,7 @@ public final class MainActivity extends Activity {
         }
         needsRender = true;
         main.post(render);
-        if (System.currentTimeMillis() - getPreferences(MODE_PRIVATE).getLong("releaseChecked", 0)
+        if (availableRelease == null && System.currentTimeMillis() - getPreferences(MODE_PRIVATE).getLong("releaseChecked", 0)
                 >= 86_400_000L) checkRelease(false);
     }
 
@@ -243,7 +243,9 @@ public final class MainActivity extends Activity {
     private void finishCheck(boolean manual, ReleaseCheck.Release release, boolean failed) {
         checkingRelease = false;
         if (isFinishing() || isDestroyed()) return;
-        if (!failed) getPreferences(MODE_PRIVATE).edit().putLong("releaseChecked", System.currentTimeMillis()).apply();
+        if (!failed && release == null) {
+            getPreferences(MODE_PRIVATE).edit().putLong("releaseChecked", System.currentTimeMillis()).apply();
+        }
         availableRelease = release;
         updates.setText(release == null ? "Проверить обновления" : "Доступно обновление " + release.version() + "  ↓");
         if (!manual) return;
