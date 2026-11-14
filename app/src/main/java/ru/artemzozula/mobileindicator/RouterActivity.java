@@ -51,6 +51,11 @@ public final class RouterActivity extends Activity {
     private WebView browser;
     private String gateway;
     private String capture;
+    private String tendaPassword;
+    private int tendaAttempt;
+    private int tendaSession;
+    private boolean tendaClickedStart, tendaClickedWifi;
+    private android.widget.Button tendaButton;
     private ConnectivityManager.NetworkCallback callback;
 
     @Override public void onCreate(Bundle state) {
@@ -98,6 +103,8 @@ public final class RouterActivity extends Activity {
         addAction(actions, "Обновить", () -> browser.reload());
         addAction(actions, "Снимок шага", this::takeCapture);
         Ui.add(header, actions, 6);
+        tendaButton = Ui.button(this, "Tenda — настроить", true, this::promptTenda);
+        Ui.add(header, tendaButton, 6);
         Ui.add(page, header, 0);
 
         browser = new WebView(this);
@@ -159,6 +166,77 @@ public final class RouterActivity extends Activity {
         row.addView(Ui.button(this, label, false, action), params);
     }
 
+    private void promptTenda() {
+        if (tendaPassword != null) {
+            finishTenda("Помощник остановлен.");
+            return;
+        }
+        android.widget.EditText password = new android.widget.EditText(this);
+        password.setHint("Пароль Wi-Fi");
+        password.setSingleLine(true);
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
+        password.setSaveEnabled(false);
+        LinearLayout content = Ui.column(this);
+        Ui.pad(content, 20, 8);
+        Ui.add(content, Ui.text(this,
+                "Подключись к заводской сети RX2 PRO и отключи WAN. Помощник заполнит пароль Wi-Fi. Перед сохранением проверь тип подключения: DHCP.",
+                15, Ui.INK, false), 0);
+        Ui.add(content, password, 8);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle("Настройка Tenda RX2 PRO").setView(content)
+                .setNegativeButton("Отмена", null).setPositiveButton("Начать", null).create();
+        dialog.show();
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String value = password.getText().toString();
+            if (value.length() < 8 || value.length() > 63 || !value.matches("[ -~]+")) {
+                password.setError("Введи 8–63 печатных символа ASCII");
+                return;
+            }
+            password.getText().clear();
+            dialog.dismiss();
+            tendaPassword = value;
+            tendaAttempt = 0;
+            tendaClickedStart = false;
+            tendaClickedWifi = false;
+            tendaButton.setText("Остановить помощник");
+            runTenda(++tendaSession);
+        });
+    }
+
+    private void runTenda(int session) {
+        if (session != tendaSession || isFinishing() || isDestroyed() || tendaPassword == null) return;
+        if (tendaAttempt++ >= 20 || !network.equals(findWifi())) {
+            finishTenda("Шаг не распознан. Продолжи вручную или запусти помощник на экране Wi-Fi.");
+            return;
+        }
+        String url = browser.getUrl();
+        if (url == null || !allowed(Uri.parse(url))) {
+            browser.postDelayed(() -> runTenda(session), 500);
+            return;
+        }
+        Uri uri = Uri.parse(url);
+        String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
+        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, !tendaClickedStart, !tendaClickedWifi), result -> {
+            if (session != tendaSession || isFinishing() || isDestroyed()) return;
+            if ("\"filled\"".equals(result)) {
+                finishTenda("Пароль заполнен. Проверь имя сети и DHCP перед сохранением.");
+                return;
+            }
+            if ("\"started\"".equals(result)) tendaClickedStart = true;
+            if ("\"wifi\"".equals(result)) tendaClickedWifi = true;
+            browser.postDelayed(() -> runTenda(session), 500);
+        });
+    }
+
+    private void finishTenda(String message) {
+        tendaSession++;
+        tendaPassword = null;
+        tendaButton.setText("Tenda — настроить");
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
     private void takeCapture() {
         String url = browser.getUrl();
         if (url == null || !allowed(Uri.parse(url))) return;
@@ -208,6 +286,7 @@ public final class RouterActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        tendaPassword = null;
         if (callback != null) connectivity.unregisterNetworkCallback(callback);
         if (browser != null) {
             browser.stopLoading();
