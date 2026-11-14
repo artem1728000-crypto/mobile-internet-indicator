@@ -5,6 +5,16 @@ import android.content.Context;
 import android.content.Intent;
 
 public final class BootReceiver extends BroadcastReceiver {
+    static boolean mobileOnly(Context context) {
+        return context.getSharedPreferences("monitor", Context.MODE_PRIVATE)
+                .getBoolean("mobileOnly", false);
+    }
+
+    static void setMobileOnly(Context context, boolean enabled) {
+        context.getSharedPreferences("monitor", Context.MODE_PRIVATE).edit()
+                .putBoolean("mobileOnly", enabled).apply();
+    }
+
     static boolean enabled(Context context) {
         return context.getSharedPreferences("monitor", Context.MODE_PRIVATE).getBoolean("enabled", false);
     }

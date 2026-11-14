@@ -13,6 +13,7 @@ import android.net.NetworkRequest;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -29,11 +30,18 @@ public final class MonitorService extends Service {
     private static final int TIMEOUT_MS = 3000;
     private static final long INTERVAL_MS = 30_000;
 
+    static final String ACTION_REFRESH = "refresh";
+    static final String ACTION_MODE = "mode";
+    static Snapshot snapshot;
+
+    record Snapshot(String transport, String status, int icon, long checkedAt,
+                    long externalMs, long yandexMs, boolean confirming) {}
+
     private enum Status {
-        NONE(R.drawable.ic_none, "Мобильный интернет недоступен"),
+        NONE(R.drawable.ic_none, "Доступ не подтверждён"),
         LIMITED(R.drawable.ic_limited, "Вероятно, белый список"),
-        FULL(R.drawable.ic_full, "Мобильный интернет работает"),
-        CHECKING(R.drawable.ic_checking, "Проверка мобильного интернета");
+        FULL(R.drawable.ic_full, "Внешний доступ есть"),
+        CHECKING(R.drawable.ic_checking, "Проверка интернета");
 
         final int icon;
         final String title;
@@ -49,7 +57,10 @@ public final class MonitorService extends Service {
     private final Runnable poll = this::poll;
     private ConnectivityManager connectivity;
     private NotificationManager notifications;
-    private Network mobile;
+    private Network selected;
+    private boolean mobileOnly;
+    private boolean registered;
+    private String transport = "Нет подключения";
     private int generation;
     private boolean runningProbe;
     private boolean destroyed;
@@ -58,19 +69,15 @@ public final class MonitorService extends Service {
 
     private final ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
         @Override public void onAvailable(Network network) {
-            mobile = network;
-            generation++;
-            confirmation = null;
-            display(Status.CHECKING);
-            schedule(0);
+            select(network);
+        }
+
+        @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+            if (network.equals(selected)) updateTransport(capabilities);
         }
 
         @Override public void onLost(Network network) {
-            if (!network.equals(mobile)) return;
-            mobile = null;
-            generation++;
-            confirmation = null;
-            display(Status.NONE);
+            if (network.equals(selected)) select(null);
         }
     };
 
@@ -84,19 +91,55 @@ public final class MonitorService extends Service {
         startForeground(NOTIFICATION_ID, notification(shown));
 
         connectivity = getSystemService(ConnectivityManager.class);
+        configure();
+    }
+
+    private void configure() {
+        if (registered) connectivity.unregisterNetworkCallback(callback);
+        mobileOnly = BootReceiver.mobileOnly(this);
+        select(null);
+        if (!mobileOnly) {
+            connectivity.registerDefaultNetworkCallback(callback, main);
+            registered = true;
+            return;
+        }
         NetworkRequest request = new NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                 .build();
         connectivity.requestNetwork(request, callback, main);
-        schedule(2500);
+        registered = true;
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (BootReceiver.enabled(this)) return START_STICKY;
+        if (BootReceiver.enabled(this)) {
+            String action = intent == null ? null : intent.getAction();
+            if (ACTION_MODE.equals(action) && mobileOnly != BootReceiver.mobileOnly(this)) configure();
+            if (ACTION_REFRESH.equals(action)) schedule(0);
+            return START_STICKY;
+        }
         stopSelf(startId);
         return START_NOT_STICKY;
+    }
+
+    private void select(Network network) {
+        selected = network;
+        generation++;
+        confirmation = null;
+        transport = network == null ? "Нет подключения" : "Определение сети…";
+        shown = network == null ? Status.NONE : Status.CHECKING;
+        publish(0, -1, -1);
+        if (network != null) schedule(0);
+    }
+
+    private void updateTransport(NetworkCapabilities caps) {
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) transport = "VPN";
+        else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transport = "Wi-Fi";
+        else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transport = "Мобильная сеть";
+        else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transport = "Ethernet";
+        else transport = "Другая сеть";
+        publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs());
     }
 
     private void schedule(long delay) {
@@ -105,31 +148,32 @@ public final class MonitorService extends Service {
     }
 
     private void poll() {
-        Network network = mobile;
-        if (network == null) {
-            display(Status.NONE);
-            return;
-        }
-        if (runningProbe) return;
+        Network network = selected;
+        if (network == null || runningProbe) return;
         int probeGeneration = generation;
         runningProbe = true;
         worker.execute(() -> {
-            Status measured = outsideReachable(network) ? Status.FULL
-                    : yandexReachable(network) ? Status.LIMITED : Status.NONE;
+            long started = SystemClock.elapsedRealtime();
+            long externalMs = outsideReachable(network) ? SystemClock.elapsedRealtime() - started : -1;
+            started = SystemClock.elapsedRealtime();
+            long yandexMs = yandexReachable(network) ? SystemClock.elapsedRealtime() - started : -1;
+            Status measured = externalMs >= 0 ? Status.FULL
+                    : yandexMs >= 0 ? Status.LIMITED : Status.NONE;
             main.post(() -> {
                 runningProbe = false;
                 if (destroyed) return;
                 if (probeGeneration != generation) {
-                    if (mobile != null) schedule(0);
+                    if (selected != null) schedule(0);
                     return;
                 }
                 if (shown == Status.CHECKING || measured.ordinal() >= shown.ordinal()
                         || measured == confirmation) {
-                    display(measured);
+                    shown = measured;
                     confirmation = null;
                 } else {
                     confirmation = measured;
                 }
+                publish(System.currentTimeMillis(), externalMs, yandexMs);
                 schedule(INTERVAL_MS);
             });
         });
@@ -150,6 +194,8 @@ public final class MonitorService extends Service {
         try {
             connection = (HttpsURLConnection) network.openConnection(new URL("https://ya.ru/"));
             connection.setRequestMethod("HEAD");
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Connection", "close");
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
@@ -162,10 +208,10 @@ public final class MonitorService extends Service {
         }
     }
 
-    private void display(Status status) {
-        if (destroyed || shown == status) return;
-        shown = status;
-        notifications.notify(NOTIFICATION_ID, notification(status));
+    private void publish(long checkedAt, long externalMs, long yandexMs) {
+        snapshot = new Snapshot(transport, shown.title, shown.icon, checkedAt, externalMs,
+                yandexMs, confirmation != null);
+        notifications.notify(NOTIFICATION_ID, notification(shown));
     }
 
     private Notification notification(Status status) {
@@ -175,14 +221,14 @@ public final class MonitorService extends Service {
         switch (status) {
             case FULL: detail = "Доступен 8.8.8.8:53"; break;
             case LIMITED: detail = "Яндекс доступен, 8.8.8.8:53 не отвечает"; break;
-            case NONE: detail = mobile == null ? "Нет подключения по мобильной сети"
+            case NONE: detail = selected == null ? "Нет подключения"
                     : "Яндекс и 8.8.8.8:53 не ответили"; break;
-            default: detail = "Проверка через мобильную сеть";
+            default: detail = "Ожидание результатов";
         }
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(status.icon)
                 .setContentTitle(status.title)
-                .setContentText(detail)
+                .setContentText(transport + " · " + detail)
                 .setContentIntent(open)
                 .setShowWhen(false)
                 .setOngoing(true)
@@ -192,7 +238,8 @@ public final class MonitorService extends Service {
 
     @Override public void onDestroy() {
         destroyed = true;
-        connectivity.unregisterNetworkCallback(callback);
+        snapshot = null;
+        if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         stopForeground(STOP_FOREGROUND_REMOVE);

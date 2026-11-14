@@ -7,6 +7,16 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.WindowInsets;
+import android.widget.ImageView;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.ScrollView;
+
+import java.text.DateFormat;
+import java.util.Date;
 import android.provider.Settings;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -15,6 +25,16 @@ import android.widget.TextView;
 public final class MainActivity extends Activity {
     private TextView status;
     private Button start;
+    private Button check;
+    private ImageView icon;
+    private TextView measurements;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable render = new Runnable() {
+        @Override public void run() {
+            renderSnapshot();
+            main.postDelayed(this, 500);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -29,12 +49,36 @@ public final class MainActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(18);
         layout.addView(status);
-        TextView legend = new TextView(this);
-        legend.setText("✓  Внешний доступ есть\n!   Яндекс доступен, вероятно белый список\n×  Мобильный доступ отсутствует\n•••  Идёт проверка");
-        legend.setTextSize(17);
-        legend.setPadding(0, padding, 0, padding);
-        layout.addView(legend);
-        start = new Button(this);
+        icon = new ImageView(this);
+        icon.setColorFilter(0xFF123367);
+        int iconSize = Math.round(42 * getResources().getDisplayMetrics().density);
+        layout.addView(icon, iconSize, iconSize);
+        measurements = new TextView(this);
+        measurements.setTextSize(17);
+        measurements.setPadding(0, 0, 0, padding);
+        layout.addView(measurements);
+
+        RadioGroup mode = new RadioGroup(this);
+        RadioButton active = new RadioButton(this);
+        active.setId(1);
+        active.setText("Активное подключение (Wi-Fi или SIM)");
+        mode.addView(active);
+        RadioButton mobile = new RadioButton(this);
+        mobile.setId(2);
+        mobile.setText("Только мобильная сеть (SIM этого телефона)");
+        mode.addView(mobile);
+        mode.check(BootReceiver.mobileOnly(this) ? 2 : 1);
+        mode.setOnCheckedChangeListener((group, checked) -> {
+            BootReceiver.setMobileOnly(this, checked == 2);
+            command(MonitorService.ACTION_MODE);
+        });
+        layout.addView(mode);
+
+        check = new Button(this);
+        check.setText("Проверить сейчас");
+        check.setOnClickListener(view -> command(MonitorService.ACTION_REFRESH));
+        layout.addView(check);
+         start = new Button(this);
         start.setOnClickListener(view -> enable());
         layout.addView(start);
         Button stop = new Button(this);
@@ -45,7 +89,17 @@ public final class MainActivity extends Activity {
             refresh();
         });
         layout.addView(stop);
-        setContentView(layout);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(layout);
+        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            }
+            return insets;
+        });
+        setContentView(scroll);
 
         if (!getPreferences(MODE_PRIVATE).getBoolean("opened", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("opened", true).apply();
@@ -56,6 +110,43 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         refresh();
+        main.post(render);
+    }
+
+    @Override protected void onPause() {
+        main.removeCallbacks(render);
+        super.onPause();
+    }
+
+    private void command(String action) {
+        if (BootReceiver.enabled(this)) {
+            startForegroundService(new Intent(this, MonitorService.class).setAction(action));
+        }
+    }
+
+    private void renderSnapshot() {
+        boolean enabled = BootReceiver.enabled(this);
+        MonitorService.Snapshot current = enabled ? MonitorService.snapshot : null;
+        check.setEnabled(enabled && current != null && !"Нет подключения".equals(current.transport()));
+        if (current == null) {
+            icon.setImageResource(R.drawable.ic_checking);
+            measurements.setText(enabled ? "Запуск наблюдения…" : "Наблюдение выключено");
+            return;
+        }
+        icon.setImageResource(current.icon());
+        String summary = current.transport() + "\n" + current.status();
+        if (current.checkedAt() > 0) {
+            summary += "\n\n8.8.8.8:53 · TCP  " + reading(current.externalMs())
+                    + "\nya.ru · HTTPS  " + reading(current.yandexMs())
+                    + "\n\nПоследняя проверка  "
+                    + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(new Date(current.checkedAt()));
+            if (current.confirming()) summary += "\nОжидается повторная проверка сбоя";
+        }
+        measurements.setText(summary);
+    }
+
+    private static String reading(long millis) {
+        return millis < 0 ? "нет ответа" : millis + " мс";
     }
 
     private boolean notificationsAvailable() {
