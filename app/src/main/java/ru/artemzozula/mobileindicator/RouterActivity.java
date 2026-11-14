@@ -181,7 +181,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                "Подключись к заводской сети RX2 PRO и отключи WAN. Помощник проверит DHCP, заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                "Подключись к заводской сети RX2 PRO и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
@@ -220,7 +220,7 @@ public final class RouterActivity extends Activity {
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             if ("\"wan\"".equals(result) || "\"password\"".equals(result)) {
-                finishTenda("\"wan\"".equals(result) ? "Не удалось подтвердить DHCP. Проверь тип WAN вручную."
+                finishTenda("\"wan\"".equals(result) ? "Мастер выбрал PPPoE или статический IP. Проверь тип WAN вручную."
                         : "Поле пароля уже заполнено или значение изменилось. Проверь Wi-Fi вручную.");
                 return;
             }

@@ -27,10 +27,11 @@ final class TendaSetup {
                     case 1:
                         return click('continue', /продолжить/i);
                     case 2: {
+                        // The custom WAN selector can hide its backing input.
+                        if (!visible(byId('wanset-page-next'))) return 'wait';
                         const wan = byId('wantype-val-input');
-                        if (!visible(wan)) return 'wait';
-                        if (!/^(динамический ip(?:-адрес)?|dhcp)$/i.test((wan.value || '').trim()))
-                            return 'wan';
+                        const value = (wan?.value || '').trim();
+                        if (/pppoe|статическ|static/i.test(value)) return 'wan';
                         return click('wanset-page-next', /^далее$/i);
                     }
                     case 3:
