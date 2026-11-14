@@ -175,7 +175,7 @@ public final class RouterActivity extends Activity {
         password.setHint("Пароль Wi-Fi");
         password.setSingleLine(true);
         password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         password.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
         password.setSaveEnabled(false);
         LinearLayout content = Ui.column(this);
@@ -184,6 +184,24 @@ public final class RouterActivity extends Activity {
                 "Подключись к заводской сети RX2 PRO и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
+        android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
+        String lastPassword = preferences.getString("last_password", "");
+        android.widget.Button reuse = Ui.button(this, "Вставить последний пароль", false, () -> {
+            password.setText(lastPassword);
+            password.setSelection(password.length());
+        });
+        reuse.setEnabled(!lastPassword.isEmpty());
+        Ui.add(content, reuse, 8);
+        Ui.add(content, Ui.button(this, "Сгенерировать пароль", false, () -> {
+            java.security.SecureRandom random = new java.security.SecureRandom();
+            StringBuilder generated = new StringBuilder(8);
+            for (int i = 0; i < 4; i++) {
+                char digit = (char) ('0' + random.nextInt(10));
+                generated.append(digit).append(digit);
+            }
+            password.setText(generated);
+            password.setSelection(password.length());
+        }), 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
                 .setTitle("Настройка Tenda RX2 PRO").setView(content)
                 .setNegativeButton("Отмена", null).setPositiveButton("Начать", null).create();
@@ -194,6 +212,7 @@ public final class RouterActivity extends Activity {
                 password.setError("Введи 8–63 печатных символа ASCII");
                 return;
             }
+            preferences.edit().putString("last_password", value).apply();
             password.getText().clear();
             dialog.dismiss();
             tendaPassword = value;
