@@ -115,7 +115,22 @@ public final class MainActivity extends Activity {
                 : current.standard() + (current.dbm() == Integer.MAX_VALUE ? "" : "\nСигнал " + current.dbm() + " дБм")
                     + (current.standard().equals("LTE") ? "\nНет данных об агрегации" : "");
         new AlertDialog.Builder(this).setTitle("Радиосеть").setMessage(message)
+                .setNeutralButton("Данные соты", (dialog, button) -> showCell())
                 .setPositiveButton("ОК", null).show();
+    }
+
+    private void showCell() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            new AlertDialog.Builder(this).setTitle("Данные соты")
+                    .setMessage("Android требует точную геолокацию для чтения диапазона и канала. Данные соты показываются здесь по запросу.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Разрешить", (dialog, button) -> requestPermissions(new String[]{
+                            Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, 3))
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Обслуживающая сота LTE")
+                .setMessage(RadioInfo.cellDetails(this)).setPositiveButton("ОК", null).show();
     }
 
     private void measureLatency() {
@@ -268,6 +283,8 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == 1 && notificationsAvailable()) enable();
         if (request == 2) command(MonitorService.ACTION_REFRESH);
+        if (request == 3 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) showCell();
         needsRender = true;
     }
 

@@ -61,6 +61,48 @@ final class RadioInfo {
         }
     }
 
+    static String cellDetails(Context context) {
+        String unavailable = "Android не сообщил данные обслуживающей соты LTE.";
+        if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) return unavailable;
+        try {
+            TelephonyManager base = context.getSystemService(TelephonyManager.class);
+            if (base == null) return unavailable;
+            int subscription = Build.VERSION.SDK_INT >= 30 ? SubscriptionManager.getActiveDataSubscriptionId()
+                    : SubscriptionManager.getDefaultDataSubscriptionId();
+            if (subscription < 0) return unavailable;
+            java.util.List<CellInfo> cells = base.createForSubscriptionId(subscription).getAllCellInfo();
+            if (cells == null) return unavailable;
+            CellInfoLte primary = null;
+            for (CellInfo cell : cells) {
+                if (!(cell instanceof CellInfoLte) || !cell.isRegistered()) continue;
+                if (primary != null) return "Android сообщил несколько обслуживающих сот LTE.";
+                primary = (CellInfoLte) cell;
+            }
+            if (primary == null) return unavailable;
+            CellIdentityLte id = primary.getCellIdentity();
+            CellSignalStrengthLte strength = primary.getCellSignalStrength();
+            StringBuilder text = new StringBuilder();
+            if (Build.VERSION.SDK_INT >= 30 && id.getBands().length > 0) {
+                text.append("Диапазоны ").append(java.util.Arrays.toString(id.getBands())).append('\n');
+            }
+            append(text, "EARFCN", id.getEarfcn(), "");
+            append(text, "PCI", id.getPci(), "");
+            if (Build.VERSION.SDK_INT >= 28) append(text, "Ширина", id.getBandwidth(), " кГц");
+            append(text, "RSRP", strength.getRsrp(), " дБм");
+            append(text, "RSRQ", strength.getRsrq(), " дБ");
+            append(text, "RSSNR", strength.getRssnr(), " дБ");
+            return text.length() == 0 ? unavailable : text.toString().trim();
+        } catch (SecurityException | UnsupportedOperationException ignored) {
+            return unavailable;
+        }
+    }
+
+    private static void append(StringBuilder text, String label, int value, String unit) {
+        if (value != Integer.MAX_VALUE && value != -1) {
+            text.append(label).append(' ').append(value).append(unit).append('\n');
+        }
+    }
     int strength() {
         if (manager == null || Build.VERSION.SDK_INT < 29) return Integer.MAX_VALUE;
         try {
