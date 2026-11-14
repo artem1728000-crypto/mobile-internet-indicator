@@ -27,6 +27,7 @@ import java.time.format.DateTimeFormatter;
 public final class RouterActivity extends Activity {
     private static boolean webViewConfigured;
     private static final int SAVE = 1;
+    private static final int SAVE_WIFI = 2;
     private static final String CAPTURE = """
             (() => {
               const clean = s => (s || '').trim().replace(/\\s+/g, ' ').slice(0, 160);
@@ -105,6 +106,7 @@ public final class RouterActivity extends Activity {
         Ui.add(header, actions, 6);
         tendaButton = Ui.button(this, "Tenda — настроить", true, this::promptTenda);
         Ui.add(header, tendaButton, 6);
+        Ui.add(header, Ui.button(this, "Объединить диапазоны Tenda", false, () -> promptTenda(true)), 6);
         Ui.add(page, header, 0);
 
         browser = new WebView(this);
@@ -166,7 +168,9 @@ public final class RouterActivity extends Activity {
         row.addView(Ui.button(this, label, false, action), params);
     }
 
-    private void promptTenda() {
+    private void promptTenda() { promptTenda(false); }
+
+    private void promptTenda(boolean merge) {
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
             return;
@@ -181,7 +185,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                "Подключись к заводской сети RX2 PRO и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети TX2L Pro и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
@@ -203,7 +207,7 @@ public final class RouterActivity extends Activity {
             password.setSelection(password.length());
         }), 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-                .setTitle("Настройка Tenda RX2 PRO").setView(content)
+                .setTitle(merge ? "Объединение диапазонов Tenda" : "Настройка Tenda TX2L Pro").setView(content)
                 .setNegativeButton("Отмена", null).setPositiveButton("Начать", null).create();
         dialog.show();
         dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
@@ -217,7 +221,7 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             tendaPassword = value;
             tendaAttempt = 0;
-            tendaStep = 0;
+            tendaStep = merge ? 10 : 0;
             tendaButton.setText("Остановить помощник");
             runTenda(++tendaSession);
         });
@@ -238,6 +242,21 @@ public final class RouterActivity extends Activity {
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
+            if ("\"manual-save\"".equals(result)) {
+                finishTenda("Диапазоны объединены в форме. Нажми «Сохранить» на странице роутера.");
+                return;
+            }
+            if (tendaStep == 6 && result != null && result.startsWith("\"ssid:")) {
+                try {
+                    String ssid = ((String) new JSONTokener(result).nextValue()).substring(5);
+                    tendaStep++;
+                    tendaAttempt = 0;
+                    if (offerWifiSave(ssid)) return;
+                } catch (org.json.JSONException ignored) {
+                    finishTenda("Не удалось прочитать имя Wi-Fi.");
+                    return;
+                }
+            }
             if ("\"wan\"".equals(result) || "\"password\"".equals(result)) {
                 finishTenda("\"wan\"".equals(result) ? "Мастер выбрал PPPoE или статический IP. Проверь тип WAN вручную."
                         : "Поле пароля уже заполнено или значение изменилось. Проверь Wi-Fi вручную.");
@@ -245,13 +264,29 @@ public final class RouterActivity extends Activity {
             }
             if ("\"advance\"".equals(result)) {
                 tendaAttempt = 0;
-                if (++tendaStep == 8) {
-                    finishTenda("Нажато «Завершить». После применения подключись к настроенной сети.");
+                if (++tendaStep == 9 || tendaStep == 14) {
+                    finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
                     return;
                 }
             }
             browser.postDelayed(() -> runTenda(session), 500);
         });
+    }
+
+    private boolean offerWifiSave(String ssid) {
+        if (Build.VERSION.SDK_INT < 30 || !ssid.matches("Tenda_[0-9A-Fa-f]{6}")) return false;
+        try {
+            android.net.wifi.WifiNetworkSuggestion suggestion =
+                    new android.net.wifi.WifiNetworkSuggestion.Builder().setSsid(ssid)
+                            .setWpa2Passphrase(tendaPassword).build();
+            java.util.ArrayList<android.net.wifi.WifiNetworkSuggestion> networks = new java.util.ArrayList<>();
+            networks.add(suggestion);
+            startActivityForResult(new Intent(android.provider.Settings.ACTION_WIFI_ADD_NETWORKS)
+                    .putParcelableArrayListExtra(android.provider.Settings.EXTRA_WIFI_NETWORK_LIST, networks), SAVE_WIFI);
+            return true;
+        } catch (android.content.ActivityNotFoundException | IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private void finishTenda(String message) {
@@ -286,6 +321,10 @@ public final class RouterActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == SAVE_WIFI) {
+            runTenda(tendaSession);
+            return;
+        }
         if (request != SAVE) return;
         if (result == RESULT_OK && data != null && data.getData() != null && capture != null) {
             try (OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {

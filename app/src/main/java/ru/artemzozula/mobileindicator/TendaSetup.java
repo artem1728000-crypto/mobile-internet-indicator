@@ -49,14 +49,51 @@ final class TendaSetup {
                         return 'advance';
                     }
                     case 6:
+                        return visible(byId('ssid-val')) ? 'ssid:' + byId('ssid-val').value : 'wait';
+                    case 7:
                         if (!visible(byId('pwd-val')) || byId('pwd-val').value !== %s) return 'password';
                         return click('wifiset-page-next', /^далее$/i);
-                    case 7:
+                    case 8:
                         return click('complete', /^завершить$/i);
+                    case 10: {
+                        const field = byId('pwd');
+                        if (!visible(field) || field.type !== 'password') return 'wait';
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, %s);
+                        field.dispatchEvent(new Event('input', {bubbles: true}));
+                        field.dispatchEvent(new Event('change', {bubbles: true}));
+                        return click('login', /^вход$/i);
+                    }
+                    case 11: {
+                        if (byId('double-val-check')) return 'advance';
+                        const link = Array.from(document.querySelectorAll('a,button,[role=button],li,div,span'))
+                            .find(e => visible(e) && /^настройки wi-fi$/i.test(e.textContent.trim())
+                                && !Array.from(e.children).some(child => child.textContent.trim() === e.textContent.trim()));
+                        if (!link) return 'wait';
+                        link.click();
+                        return 'advance';
+                    }
+                    case 12: {
+                        const toggle = byId('double-val-check');
+                        if (!toggle || toggle.type !== 'checkbox' || toggle.disabled) return 'wait';
+                        if (!toggle.checked) {
+                            const label = Array.from(toggle.labels || []).find(visible);
+                            if (!visible(toggle) && !label) return 'wait';
+                            (label || toggle).click();
+                        }
+                        return 'advance';
+                    }
+                    case 13: {
+                        if (!byId('double-val-check')?.checked) return 'wait';
+                        const save = Array.from(document.querySelectorAll('button,input[type=submit],a,[role=button]'))
+                            .filter(e => visible(e) && /^сохранить$/i.test((e.value || e.textContent).trim()));
+                        if (save.length !== 1) return 'manual-save';
+                        save[0].click();
+                        return 'advance';
+                    }
                     default:
                         return 'wait';
                 }
             })()
-            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password));
+            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password));
     }
 }
