@@ -3,12 +3,9 @@ package ru.artemzozula.mobileindicator;
 import android.app.Activity;
 import android.app.DatePickerDialog;
 import android.database.Cursor;
-import android.os.Build;
 import android.os.Bundle;
-import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.time.Instant;
@@ -26,6 +23,7 @@ public final class HistoryActivity extends Activity {
     private LocalDate day = LocalDate.now();
     private boolean workHours;
     private TextView report;
+    private LinearLayout timeline;
     private Button date;
     private Button next;
     private Button hours;
@@ -44,39 +42,31 @@ public final class HistoryActivity extends Activity {
             day = LocalDate.ofEpochDay(state.getLong("day"));
             workHours = state.getBoolean("workHours");
         }
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        int padding = Math.round(20 * getResources().getDisplayMetrics().density);
-        layout.setPadding(padding, padding, padding, padding);
-        button(layout, "← К диагностике", this::finish);
-        TextView title = new TextView(this);
-        title.setText("История интернета");
-        title.setTextSize(26);
-        layout.addView(title);
+        LinearLayout layout = Ui.screen(this);
+        Ui.add(layout, Ui.button(this, "‹  Диагностика", false, this::finish), 0);
+        Ui.add(layout, Ui.text(this, "История интернета", 28, Ui.INK, true), 18);
         date = button(layout, "", this::pickDate);
         LinearLayout navigation = new LinearLayout(this);
         button(navigation, "‹ Назад", () -> go(day.minusDays(1)));
         button(navigation, "Сегодня", () -> go(LocalDate.now()));
         next = button(navigation, "Вперёд ›", () -> go(day.plusDays(1)));
-        layout.addView(navigation);
+        Ui.add(layout, navigation, 4);
         hours = button(layout, "", () -> {
             workHours = !workHours;
             render();
         });
-        report = new TextView(this);
-        report.setTextSize(16);
-        layout.addView(report);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(layout);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(
-                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            }
-            return insets;
-        });
-        setContentView(scroll);
+        LinearLayout card = Ui.column(this);
+        Ui.pad(card, 16, 16);
+        card.setBackground(Ui.shape(this, Ui.SURFACE, Ui.LINE, 20));
+        timeline = new LinearLayout(this);
+        timeline.setBackground(Ui.shape(this, Ui.LINE, 0, 8));
+        timeline.setClipToOutline(true);
+        android.widget.LinearLayout.LayoutParams bar = new LinearLayout.LayoutParams(-1, Ui.dp(this, 13));
+        card.addView(timeline, bar);
+        report = Ui.text(this, "", 15, Ui.INK, false);
+        report.setLineSpacing(Ui.dp(this, 4), 1);
+        Ui.add(card, report, 14);
+        Ui.add(layout, card, 16);
     }
 
     @Override protected void onResume() {
@@ -101,10 +91,14 @@ public final class HistoryActivity extends Activity {
     }
 
     private static Button button(LinearLayout layout, String text, Runnable click) {
-        Button button = new Button(layout.getContext());
-        button.setText(text);
-        button.setOnClickListener(view -> click.run());
-        layout.addView(button);
+        Button button = Ui.button(layout.getContext(), text, false, click);
+        if (layout.getOrientation() == LinearLayout.HORIZONTAL) {
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
+            if (layout.getChildCount() > 0) params.setMarginStart(Ui.dp(layout.getContext(), 5));
+            layout.addView(button, params);
+        } else {
+            Ui.add(layout, button, 8);
+        }
         return button;
     }
 
@@ -129,6 +123,7 @@ public final class HistoryActivity extends Activity {
         long start = at(day, workHours ? LocalTime.of(8, 0) : LocalTime.MIDNIGHT);
         long endOfDay = at(day.plusDays(1), LocalTime.MIDNIGHT);
         long end = Math.min(System.currentTimeMillis(), workHours ? at(day, LocalTime.of(17, 0)) : endOfDay);
+        timeline.removeAllViews();
         if (end <= start) {
             report.setText("Этот период ещё не начался");
             return;
@@ -141,10 +136,15 @@ public final class HistoryActivity extends Activity {
                 long from = Math.max(cursor, rows.getLong(0));
                 long to = Math.min(end, rows.getLong(1));
                 if (to <= from) continue;
-                if (from > cursor) append(periods, cursor, from, "Нет наблюдения", endOfDay);
+                if (from > cursor) {
+                    segment(from - cursor, Ui.LINE);
+                    append(periods, cursor, from, "Нет наблюдения", endOfDay);
+                }
                 String status = rows.getString(2);
                 long duration = to - from;
                 observed += duration;
+                segment(duration, status.equals(HistoryStore.FULL) ? Ui.GREEN
+                        : status.equals(HistoryStore.LIMITED) ? Ui.AMBER : Ui.RED);
                 switch (status) {
                     case HistoryStore.FULL: full += duration; break;
                     case HistoryStore.LIMITED: limited += duration; break;
@@ -154,10 +154,26 @@ public final class HistoryActivity extends Activity {
                 cursor = to;
             }
         }
-        if (cursor < end) append(periods, cursor, end, "Нет наблюдения", endOfDay);
-        report.setText("Доступ есть  " + duration(full) + "\nВероятный белый список  "
-                + duration(limited) + "\nДоступ не подтверждён  " + duration(none)
-                + "\nНет наблюдения  " + duration(end - start - observed) + "\n\n" + periods);
+        if (cursor < end) {
+            segment(end - cursor, Ui.LINE);
+            append(periods, cursor, end, "Нет наблюдения", endOfDay);
+        }
+        String summary = "● Доступ есть  " + duration(full) + "\n● Вероятный белый список  "
+                + duration(limited) + "\n● Доступ не подтверждён  " + duration(none)
+                + "\n● Нет наблюдения  " + duration(end - start - observed) + "\n\n";
+        android.text.SpannableString content = new android.text.SpannableString(summary + periods);
+        int index = -1;
+        for (int color : new int[]{Ui.GREEN, Ui.AMBER, Ui.RED, Ui.MUTED}) {
+            index = summary.indexOf('●', index + 1);
+            content.setSpan(new android.text.style.ForegroundColorSpan(color), index, index + 1, 0);
+        }
+        report.setText(content);
+    }
+
+    private void segment(long millis, int color) {
+        android.view.View block = new android.view.View(this);
+        block.setBackgroundColor(color);
+        timeline.addView(block, new LinearLayout.LayoutParams(0, -1, millis / 1000f));
     }
 
     private long at(LocalDate date, LocalTime time) {

@@ -2,32 +2,36 @@ package ru.artemzozula.mobileindicator;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.WindowInsets;
-import android.widget.ImageView;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
-import android.widget.ScrollView;
-
-import java.text.DateFormat;
-import java.util.Date;
 import android.provider.Settings;
+import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.text.DateFormat;
+import java.util.Date;
+
 public final class MainActivity extends Activity {
-    private TextView status;
-    private Button start;
-    private Button check;
-    private ImageView icon;
-    private TextView measurements;
+    private TextView transport, headline, detail, external, yandex;
+    private LinearLayout hero;
+    private SignalView signal;
+    private Button monitor, check, activeMode, mobileMode, updates;
+    private MonitorService.Snapshot rendered;
+    private boolean renderedEnabled;
+    private boolean needsRender = true;
+    private boolean checkingRelease;
+    private ReleaseCheck.Release availableRelease;
+    private String version;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable render = new Runnable() {
         @Override public void run() {
@@ -38,72 +42,55 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        int padding = Math.round(24 * getResources().getDisplayMetrics().density);
-        layout.setPadding(padding, padding, padding, padding);
-        TextView title = new TextView(this);
-        title.setText("Мобильный интернет");
-        title.setTextSize(28);
-        layout.addView(title);
-        status = new TextView(this);
-        status.setTextSize(18);
-        layout.addView(status);
-        icon = new ImageView(this);
-        icon.setColorFilter(0xFF123367);
-        int iconSize = Math.round(42 * getResources().getDisplayMetrics().density);
-        layout.addView(icon, iconSize, iconSize);
-        measurements = new TextView(this);
-        measurements.setTextSize(17);
-        measurements.setPadding(0, 0, 0, padding);
-        layout.addView(measurements);
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException error) {
+            throw new IllegalStateException(error);
+        }
+        LinearLayout page = Ui.screen(this);
+        Ui.add(page, Ui.text(this, "Мобильный интернет", 29, Ui.INK, true), 0);
+        hero = Ui.column(this);
+        hero.setGravity(Gravity.CENTER_HORIZONTAL);
+        Ui.pad(hero, 18, 20);
+        Ui.add(page, hero, 19);
+        transport = Ui.text(this, "", 13, Ui.BLUE, true);
+        transport.setGravity(Gravity.CENTER);
+        Ui.add(hero, transport, 0);
+        signal = new SignalView(this);
+        hero.addView(signal, Ui.dp(this, 128), Ui.dp(this, 118));
+        headline = Ui.text(this, "", 24, Ui.INK, true);
+        headline.setGravity(Gravity.CENTER);
+        Ui.add(hero, headline, 0);
+        detail = Ui.text(this, "", 13, Ui.MUTED, false);
+        detail.setGravity(Gravity.CENTER);
+        Ui.add(hero, detail, 8);
 
-        RadioGroup mode = new RadioGroup(this);
-        RadioButton active = new RadioButton(this);
-        active.setId(android.view.View.generateViewId());
-        active.setText("Активное подключение (Wi-Fi или SIM)");
-        mode.addView(active);
-        RadioButton mobile = new RadioButton(this);
-        mobile.setId(android.view.View.generateViewId());
-        mobile.setText("Только мобильная сеть (SIM этого телефона)");
-        mode.addView(mobile);
-        mode.check(BootReceiver.mobileOnly(this) ? mobile.getId() : active.getId());
-        mode.setOnCheckedChangeListener((group, checked) -> {
-            BootReceiver.setMobileOnly(this, checked == mobile.getId());
-            command(MonitorService.ACTION_MODE);
-        });
-        layout.addView(mode);
+        LinearLayout readings = new LinearLayout(this);
+        external = readingCard(readings, "8.8.8.8:53", "TCP");
+        yandex = readingCard(readings, "ya.ru", "HTTPS");
+        Ui.add(page, readings, 12);
+        check = Ui.button(this, "Проверить сейчас", true, () -> command(MonitorService.ACTION_REFRESH));
+        Ui.add(page, check, 14);
+        Ui.add(page, Ui.button(this, "История по дням  ›", false,
+                () -> startActivity(new Intent(this, HistoryActivity.class))), 8);
 
-        check = new Button(this);
-        check.setText("Проверить сейчас");
-        check.setOnClickListener(view -> command(MonitorService.ACTION_REFRESH));
-        layout.addView(check);
-        Button history = new Button(this);
-        history.setText("История по дням");
-        history.setOnClickListener(view -> startActivity(new Intent(this, HistoryActivity.class)));
-        layout.addView(history);
-         start = new Button(this);
-        start.setOnClickListener(view -> enable());
-        layout.addView(start);
-        Button stop = new Button(this);
-        stop.setText("Выключить наблюдение");
-        stop.setOnClickListener(view -> {
-            BootReceiver.setEnabled(this, false);
-            stopService(new Intent(this, MonitorService.class));
-            refresh();
+        Ui.add(page, Ui.text(this, "Проверяемая сеть", 17, Ui.INK, true), 24);
+        LinearLayout modes = new LinearLayout(this);
+        activeMode = Ui.button(this, "Активная сеть", false, () -> setMode(false));
+        mobileMode = Ui.button(this, "Только SIM", false, () -> setMode(true));
+        addHalf(modes, activeMode);
+        addHalf(modes, mobileMode);
+        Ui.add(page, modes, 8);
+        Ui.add(page, Ui.text(this, "Для Wi-Fi и раздачи выбери активную сеть.", 13, Ui.MUTED, false), 8);
+        monitor = Ui.button(this, "", false, this::toggle);
+        Ui.add(page, monitor, 16);
+        updates = Ui.button(this, "Проверить обновления", false, () -> {
+            if (availableRelease != null) showRelease(availableRelease);
+            else checkRelease(true);
         });
-        layout.addView(stop);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(layout);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(
-                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            }
-            return insets;
-        });
-        setContentView(scroll);
+        Ui.add(page, updates, 8);
+        Ui.add(page, Ui.text(this, "Версия " + version, 12, Ui.MUTED, false), 12);
+        showMode();
 
         if (!getPreferences(MODE_PRIVATE).getBoolean("opened", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("opened", true).apply();
@@ -111,15 +98,52 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private TextView readingCard(LinearLayout row, String address, String protocol) {
+        LinearLayout card = Ui.column(this);
+        Ui.pad(card, 14, 13);
+        card.setBackground(Ui.shape(this, Ui.SURFACE, Ui.LINE, 18));
+        Ui.add(card, Ui.text(this, address, 14, Ui.INK, true), 0);
+        TextView value = Ui.text(this, "—", 19, Ui.BLUE, true);
+        Ui.add(card, value, 5);
+        Ui.add(card, Ui.text(this, protocol, 12, Ui.MUTED, false), 4);
+        addHalf(row, card);
+        return value;
+    }
+
+    private void addHalf(LinearLayout row, android.view.View view) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1);
+        if (row.getChildCount() > 0) params.setMarginStart(Ui.dp(this, 8));
+        row.addView(view, params);
+    }
+
     @Override protected void onResume() {
         super.onResume();
-        refresh();
+        if (BootReceiver.enabled(this) && MonitorService.snapshot == null) {
+            startForegroundService(new Intent(this, MonitorService.class));
+        }
+        needsRender = true;
         main.post(render);
+        if (System.currentTimeMillis() - getPreferences(MODE_PRIVATE).getLong("releaseChecked", 0)
+                >= 86_400_000L) checkRelease(false);
     }
 
     @Override protected void onPause() {
         main.removeCallbacks(render);
         super.onPause();
+    }
+
+    private void setMode(boolean mobile) {
+        BootReceiver.setMobileOnly(this, mobile);
+        showMode();
+        command(MonitorService.ACTION_MODE);
+    }
+
+    private void showMode() {
+        boolean mobile = BootReceiver.mobileOnly(this);
+        activeMode.setTextColor(mobile ? Ui.MUTED : Ui.BLUE);
+        mobileMode.setTextColor(mobile ? Ui.BLUE : Ui.MUTED);
+        activeMode.setSelected(!mobile);
+        mobileMode.setSelected(mobile);
     }
 
     private void command(String action) {
@@ -131,26 +155,37 @@ public final class MainActivity extends Activity {
     private void renderSnapshot() {
         boolean enabled = BootReceiver.enabled(this);
         MonitorService.Snapshot current = enabled ? MonitorService.snapshot : null;
-        check.setEnabled(enabled && current != null && !"Нет подключения".equals(current.transport()));
-        if (current == null) {
-            icon.setImageResource(R.drawable.ic_checking);
-            measurements.setText(enabled ? "Запуск наблюдения…" : "Наблюдение выключено");
-            return;
-        }
-        icon.setImageResource(current.icon());
-        String summary = current.transport() + "\n" + current.status();
-        if (current.checkedAt() > 0) {
-            summary += "\n\n8.8.8.8:53 · TCP  " + reading(current.externalMs())
-                    + "\nya.ru · HTTPS  " + reading(current.yandexMs())
-                    + "\n\nПоследняя проверка  "
-                    + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(new Date(current.checkedAt()));
-            if (current.confirming()) summary += "\nОжидается повторная проверка сбоя";
-        }
-        measurements.setText(summary);
+        if (!needsRender && current == rendered && enabled == renderedEnabled) return;
+        needsRender = false;
+        rendered = current;
+        renderedEnabled = enabled;
+        int icon = current == null ? R.drawable.ic_checking : current.icon();
+        int accent = icon == R.drawable.ic_full ? Ui.GREEN : icon == R.drawable.ic_limited ? Ui.AMBER
+                : icon == R.drawable.ic_none ? Ui.RED : Ui.BLUE;
+        GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF192638, Ui.BACK, Ui.SURFACE});
+        background.setCornerRadius(Ui.dp(this, 26));
+        background.setStroke(Ui.dp(this, 1), Ui.LINE);
+        hero.setBackground(background);
+        transport.setText(current == null ? "Мониторинг" : current.transport());
+        transport.setTextColor(accent);
+        signal.show(icon, accent);
+        headline.setText(current == null ? (enabled ? "Запуск наблюдения…" : "Наблюдение на паузе") : current.status());
+        boolean measured = current != null && current.checkedAt() > 0;
+        detail.setText(measured ? "Проверено в "
+                + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(new Date(current.checkedAt()))
+                + (current.confirming() ? "\nПроверяем, повторится ли сбой" : "")
+                : enabled ? "Автоматические проверки в фоне" : "Включи наблюдение, чтобы начать замеры");
+        external.setText(measured ? reading(current.externalMs()) : "—");
+        yandex.setText(measured ? reading(current.yandexMs()) : "—");
+        check.setEnabled(current != null && !"Нет подключения".equals(current.transport()));
+        check.setAlpha(check.isEnabled() ? 1f : .55f);
+        monitor.setText(!notificationsAvailable() ? "Разрешить уведомления"
+                : enabled ? "Приостановить наблюдение" : "Включить наблюдение");
     }
 
     private static String reading(long millis) {
-        return millis < 0 ? "нет ответа" : millis + " мс";
+        return millis < 0 ? "Нет ответа" : millis + " мс";
     }
 
     private boolean notificationsAvailable() {
@@ -158,6 +193,16 @@ public final class MainActivity extends Activity {
         android.app.NotificationChannel channel = manager.getNotificationChannel(MonitorService.CHANNEL);
         return manager.areNotificationsEnabled()
                 && (channel == null || channel.getImportance() != NotificationManager.IMPORTANCE_NONE);
+    }
+
+    private void toggle() {
+        if (!notificationsAvailable() || !BootReceiver.enabled(this)) {
+            enable();
+        } else {
+            BootReceiver.setEnabled(this, false);
+            stopService(new Intent(this, MonitorService.class));
+            renderSnapshot();
+        }
     }
 
     private void enable() {
@@ -172,20 +217,52 @@ public final class MainActivity extends Activity {
         } else {
             BootReceiver.setEnabled(this, true);
             startForegroundService(new Intent(this, MonitorService.class));
-            refresh();
         }
-    }
-
-    private void refresh() {
-        boolean available = notificationsAvailable();
-        status.setText(!available ? "Разреши уведомления для значка в строке состояния"
-                : BootReceiver.enabled(this) ? "Наблюдение включено" : "Наблюдение выключено");
-        start.setText(available ? "Включить наблюдение" : "Разрешить уведомления");
     }
 
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == 1 && notificationsAvailable()) enable();
-        refresh();
+        needsRender = true;
+    }
+
+    private void checkRelease(boolean manual) {
+        if (checkingRelease) return;
+        checkingRelease = true;
+        if (manual) updates.setText("Проверяем GitHub…");
+        new Thread(() -> {
+            try {
+                ReleaseCheck.Release release = ReleaseCheck.latest(version);
+                runOnUiThread(() -> finishCheck(manual, release, false));
+            } catch (Exception error) {
+                runOnUiThread(() -> finishCheck(manual, null, true));
+            }
+        }, "github-release").start();
+    }
+
+    private void finishCheck(boolean manual, ReleaseCheck.Release release, boolean failed) {
+        checkingRelease = false;
+        if (isFinishing() || isDestroyed()) return;
+        if (!failed) getPreferences(MODE_PRIVATE).edit().putLong("releaseChecked", System.currentTimeMillis()).apply();
+        availableRelease = release;
+        updates.setText(release == null ? "Проверить обновления" : "Доступно обновление " + release.version() + "  ↓");
+        if (!manual) return;
+        if (release != null) showRelease(release);
+        else new AlertDialog.Builder(this)
+                .setMessage(failed ? "GitHub не ответил. Повтори проверку позже." : "Установлена актуальная версия.")
+                .setPositiveButton("OK", null).show();
+    }
+
+    private void showRelease(ReleaseCheck.Release release) {
+        new AlertDialog.Builder(this).setTitle("Версия " + release.version())
+                .setMessage("Скачай APK из GitHub и открой его для установки поверх текущей версии.")
+                .setNegativeButton("Позже", null)
+                .setPositiveButton("Скачать APK", (dialog, which) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(release.download())));
+                    } catch (android.content.ActivityNotFoundException error) {
+                        android.widget.Toast.makeText(this, "Для скачивания нужен браузер", android.widget.Toast.LENGTH_LONG).show();
+                    }
+                }).show();
     }
 }
