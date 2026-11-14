@@ -59,6 +59,8 @@ public final class MonitorService extends Service {
     private NotificationManager notifications;
     private HistoryStore history;
     private Network selected;
+    static Network probeNetwork;
+
     private boolean mobileOnly;
     private boolean registered;
     private String transport = "Нет подключения";
@@ -128,6 +130,7 @@ public final class MonitorService extends Service {
 
     private void select(Network network) {
         selected = network;
+        probeNetwork = network;
         generation++;
         confirmation = null;
         transport = network == null ? "Нет подключения" : "Определение сети…";
@@ -254,6 +257,7 @@ public final class MonitorService extends Service {
     @Override public void onDestroy() {
         destroyed = true;
         snapshot = null;
+        probeNetwork = null;
         if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);
         worker.shutdownNow();

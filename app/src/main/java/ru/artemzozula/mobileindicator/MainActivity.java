@@ -66,11 +66,12 @@ public final class MainActivity extends Activity {
         Ui.add(hero, detail, 8);
 
         LinearLayout readings = new LinearLayout(this);
-        external = readingCard(readings, "8.8.8.8:53", "TCP");
-        yandex = readingCard(readings, "ya.ru", "HTTPS");
+        external = readingCard(readings, "8.8.8.8:53", "Открытие TCP");
+        yandex = readingCard(readings, "ya.ru", "Ответ HTTPS");
         Ui.add(page, readings, 12);
         check = Ui.button(this, "Проверить сейчас", true, () -> command(MonitorService.ACTION_REFRESH));
         Ui.add(page, check, 14);
+        Ui.add(page, Ui.button(this, "Измерить задержку DNS", false, this::measureLatency), 8);
         Ui.add(page, Ui.button(this, "История по дням  ›", false,
                 () -> startActivity(new Intent(this, HistoryActivity.class))), 8);
 
@@ -96,6 +97,28 @@ public final class MainActivity extends Activity {
             getPreferences(MODE_PRIVATE).edit().putBoolean("opened", true).apply();
             enable();
         }
+    }
+
+    private void measureLatency() {
+        android.net.Network network = MonitorService.probeNetwork;
+        if (network == null) {
+            new AlertDialog.Builder(this).setMessage("Сначала включи наблюдение и дождись подключения.")
+                    .setPositiveButton("ОК", null).show();
+            return;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Задержка DNS")
+                .setMessage("Отправляем три запроса по UDP к 8.8.8.8…")
+                .setPositiveButton("Закрыть", null).show();
+        new Thread(() -> {
+            String result = DnsLatency.measure(network);
+            runOnUiThread(() -> {
+                if (!dialog.isShowing() || isDestroyed()) return;
+                dialog.setMessage(network.equals(MonitorService.probeNetwork)
+                        ? result + "\n\nМедиана ответов DNS по UDP. Тайм-аут запроса — 1 с."
+                        : "Подключение сменилось. Повтори замер.");
+            });
+        }, "dns-latency").start();
     }
 
     private TextView readingCard(LinearLayout row, String address, String protocol) {
