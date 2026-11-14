@@ -62,7 +62,8 @@ public final class MonitorService extends Service {
     private final RadioInfo radio = new RadioInfo();
     private Network selected;
     static Network probeNetwork;
-    private LinkProperties linkProperties;
+    static Network routerNetwork;
+    private boolean wifiRegistered;
     static RouterLink routerLink;
 
     private boolean mobileOnly;
@@ -83,17 +84,29 @@ public final class MonitorService extends Service {
             if (network.equals(selected)) updateTransport(capabilities);
         }
 
+        @Override public void onLost(Network network) {
+            if (network.equals(selected)) select(null);
+        }
+    };
+
+    private final ConnectivityManager.NetworkCallback wifiCallback = new ConnectivityManager.NetworkCallback() {
+        @Override public void onAvailable(Network network) {
+            routerNetwork = network;
+            routerLink = RouterLink.from(null);
+            notifications.notify(NOTIFICATION_ID, notification(shown));
+        }
+
         @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-            if (!network.equals(selected)) return;
-            linkProperties = properties;
-            if ("Wi-Fi".equals(transport)) {
-                routerLink = RouterLink.from(properties);
-                notifications.notify(NOTIFICATION_ID, notification(shown));
-            }
+            if (!network.equals(routerNetwork)) return;
+            routerLink = RouterLink.from(properties);
+            notifications.notify(NOTIFICATION_ID, notification(shown));
         }
 
         @Override public void onLost(Network network) {
-            if (network.equals(selected)) select(null);
+            if (!network.equals(routerNetwork)) return;
+            routerLink = null;
+            routerNetwork = null;
+            notifications.notify(NOTIFICATION_ID, notification(shown));
         }
     };
 
@@ -113,11 +126,19 @@ public final class MonitorService extends Service {
 
     private void configure() {
         if (registered) connectivity.unregisterNetworkCallback(callback);
+        if (wifiRegistered) connectivity.unregisterNetworkCallback(wifiCallback);
+        wifiRegistered = false;
+        routerNetwork = null;
+        routerLink = null;
         mobileOnly = BootReceiver.mobileOnly(this);
         history.separate();
         select(null);
         if (!mobileOnly) {
             connectivity.registerDefaultNetworkCallback(callback, main);
+            NetworkRequest wifi = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
+            connectivity.registerNetworkCallback(wifi, wifiCallback, main);
+            wifiRegistered = true;
             registered = true;
             return;
         }
@@ -142,8 +163,6 @@ public final class MonitorService extends Service {
     }
 
     private void select(Network network) {
-        linkProperties = null;
-        routerLink = null;
         selected = network;
         probeNetwork = network;
         generation++;
@@ -160,7 +179,6 @@ public final class MonitorService extends Service {
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transport = "Мобильная сеть";
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transport = "Ethernet";
         else transport = "Другая сеть";
-        routerLink = "Wi-Fi".equals(transport) ? RouterLink.from(linkProperties) : null;
         publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs(), snapshot.standard(), snapshot.dbm());
     }
 
@@ -265,7 +283,7 @@ public final class MonitorService extends Service {
                 title = wifi.gateway().isEmpty() ? "Шлюз Wi-Fi не найден" : "Открыть настройки роутера";
                 text = "IP " + wifi.address() + (wifi.gateway().isEmpty() ? "" : " · Шлюз " + wifi.gateway());
                 if (!wifi.gateway().isEmpty()) {
-                    open = PendingIntent.getActivity(this, 1, wifi.browserIntent(), PendingIntent.FLAG_IMMUTABLE);
+                    open = PendingIntent.getActivity(this, 1, wifi.browserIntent(this, routerNetwork), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
                 }
             }
             return new Notification.Builder(this, CHANNEL)
@@ -302,6 +320,8 @@ public final class MonitorService extends Service {
         destroyed = true;
         snapshot = null;
         probeNetwork = null;
+        routerNetwork = null;
+        if (wifiRegistered) connectivity.unregisterNetworkCallback(wifiCallback);
         routerLink = null;
         if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);

@@ -187,7 +187,7 @@ public final class MainActivity extends Activity {
 
     private void updateWifi() {
         WifiLink link = BootReceiver.enabled(this) && !BootReceiver.mobileOnly(this)
-                ? WifiLink.read(this, MonitorService.probeNetwork) : null;
+                ? WifiLink.read(this, MonitorService.routerNetwork) : null;
         wifiCard.setVisibility(link == null ? android.view.View.GONE : android.view.View.VISIBLE);
         if (link == null) return;
         wifiSignal.setText(link.rssi() > -127 && link.rssi() < 0 ? link.rssi() + " дБм" : "—");
@@ -203,11 +203,11 @@ public final class MainActivity extends Activity {
 
     private void openRouter() {
         RouterLink router = MonitorService.routerLink;
-        if (router == null || router.gateway().isEmpty() || BootReceiver.mobileOnly(this)) return;
+        if (router == null || router.gateway().isEmpty() || MonitorService.routerNetwork == null || BootReceiver.mobileOnly(this)) return;
         try {
-            startActivity(router.browserIntent());
+            startActivity(router.browserIntent(this, MonitorService.routerNetwork));
         } catch (android.content.ActivityNotFoundException error) {
-            android.widget.Toast.makeText(this, "Для открытия шлюза нужен браузер",
+            android.widget.Toast.makeText(this, "Не удалось открыть настройки роутера",
                     android.widget.Toast.LENGTH_LONG).show();
         }
     }

@@ -4,7 +4,8 @@ import android.content.Intent;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.RouteInfo;
-import android.net.Uri;
+import android.net.Network;
+import android.content.Context;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -32,8 +33,9 @@ record RouterLink(String address, String gateway) {
         return new RouterLink(address, "");
     }
 
-    Intent browserIntent() {
-        return new Intent(Intent.ACTION_VIEW, Uri.parse("http://" + gateway + "/"))
-                .addCategory(Intent.CATEGORY_BROWSABLE);
+    Intent browserIntent(Context context, Network network) {
+        return new Intent(context, RouterActivity.class)
+                .putExtra("gateway", gateway)
+                .putExtra("network", network.getNetworkHandle());
     }
 }
