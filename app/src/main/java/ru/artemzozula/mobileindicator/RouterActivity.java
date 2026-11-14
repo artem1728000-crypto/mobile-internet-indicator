@@ -57,6 +57,9 @@ public final class RouterActivity extends Activity {
     private int tendaSession;
     private int tendaStep;
     private String tendaSsid;
+    private boolean applyingTenda;
+    private boolean savingWifi;
+    private boolean routerLost;
     private android.widget.Button tendaButton;
     private ConnectivityManager.NetworkCallback callback;
 
@@ -79,6 +82,8 @@ public final class RouterActivity extends Activity {
             @Override public void onLost(Network lost) {
                 if (lost.equals(network)) runOnUiThread(() -> {
                     if (isDestroyed() || browser == null) return;
+                    routerLost = true;
+                    if (applyingTenda || savingWifi) return;
                     browser.stopLoading();
                     Toast.makeText(RouterActivity.this, "Связь с роутером потеряна", Toast.LENGTH_LONG).show();
                     finish();
@@ -242,12 +247,14 @@ public final class RouterActivity extends Activity {
         }
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
+        applyingTenda = tendaStep == 9;
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
+            applyingTenda = false;
             if ("\"ready-to-save\"".equals(result) && tendaStep == 8) {
                 tendaStep = 9;
                 tendaAttempt = 0;
-                if (tendaSsid != null && offerWifiSave(tendaSsid)) return;
+
             }
             if ("\"manual-save\"".equals(result)) {
                 finishTenda("Диапазоны объединены в форме. Нажми «Сохранить» на странице роутера.");
@@ -271,12 +278,14 @@ public final class RouterActivity extends Activity {
             }
             if ("\"advance\"".equals(result)) {
                 tendaAttempt = 0;
-                if (++tendaStep == 10 || tendaStep == 14) {
+                if (++tendaStep == 10 && tendaSsid != null && offerWifiSave(tendaSsid)) return;
+                if (tendaStep == 10 || tendaStep == 14) {
                     finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
                     return;
                 }
             }
-            browser.postDelayed(() -> runTenda(session), 500);
+            if (routerLost) finish();
+            else browser.postDelayed(() -> runTenda(session), 500);
         });
     }
 
@@ -288,10 +297,12 @@ public final class RouterActivity extends Activity {
                             .setWpa2Passphrase(tendaPassword).build();
             java.util.ArrayList<android.net.wifi.WifiNetworkSuggestion> networks = new java.util.ArrayList<>();
             networks.add(suggestion);
+            savingWifi = true;
             startActivityForResult(new Intent(android.provider.Settings.ACTION_WIFI_ADD_NETWORKS)
                     .putParcelableArrayListExtra(android.provider.Settings.EXTRA_WIFI_NETWORK_LIST, networks), SAVE_WIFI);
             return true;
         } catch (android.content.ActivityNotFoundException | IllegalArgumentException ignored) {
+            savingWifi = false;
             return false;
         }
     }
@@ -329,7 +340,15 @@ public final class RouterActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == SAVE_WIFI) {
-            runTenda(tendaSession);
+            savingWifi = false;
+            java.util.ArrayList<Integer> codes = data == null ? null : data.getIntegerArrayListExtra(
+                    android.provider.Settings.EXTRA_WIFI_NETWORK_RESULT_LIST);
+            boolean saved = result == RESULT_OK && codes != null && !codes.isEmpty()
+                    && (codes.get(0) == android.provider.Settings.ADD_WIFI_RESULT_SUCCESS
+                    || codes.get(0) == android.provider.Settings.ADD_WIFI_RESULT_ALREADY_EXISTS);
+            finishTenda(saved ? "Сеть сохранена в Android. Подключись после перезапуска Wi-Fi."
+                    : "Android не подтвердил сохранение. Подключись к сети вручную.");
+            if (routerLost) finish();
             return;
         }
         if (request != SAVE) return;
