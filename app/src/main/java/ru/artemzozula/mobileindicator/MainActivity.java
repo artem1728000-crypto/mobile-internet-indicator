@@ -24,7 +24,8 @@ import java.util.Date;
 public final class MainActivity extends Activity {
     private TextView transport, headline, detail, external, yandex;
     private LinearLayout hero, wifiCard;
-    private TextView wifiSignal, wifiFrequency, wifiChannel, wifiSpeed;
+    private TextView wifiSignal, wifiFrequency, wifiChannel, wifiSpeed, wifiAddress;
+    private Button wifiGateway;
     private final Runnable renderWifi = new Runnable() {
         @Override public void run() {
             updateWifi();
@@ -84,6 +85,9 @@ public final class MainActivity extends Activity {
         wifiFrequency = wifiRow("Частота");
         wifiChannel = wifiRow("Канал");
         wifiSpeed = wifiRow("Скорость до точки доступа");
+        wifiAddress = wifiRow("IP телефона");
+        wifiGateway = Ui.button(this, "Шлюз", false, this::openRouter);
+        Ui.add(wifiCard, wifiGateway, 10);
         wifiCard.setVisibility(android.view.View.GONE);
         Ui.add(page, wifiCard, 12);
         check = Ui.button(this, "Проверить сейчас", true, () -> command(MonitorService.ACTION_REFRESH));
@@ -190,6 +194,22 @@ public final class MainActivity extends Activity {
         wifiFrequency.setText(link.frequency() > 0 ? link.frequency() + " МГц" : "—");
         wifiChannel.setText(link.channel() > 0 ? Integer.toString(link.channel()) : "—");
         wifiSpeed.setText(link.speed() > 0 ? link.speed() + " Мбит/с" : "—");
+        RouterLink router = MonitorService.routerLink;
+        wifiAddress.setText(router == null || router.address().isEmpty() ? "Получение IPv4…" : router.address());
+        boolean gatewayReady = router != null && !router.gateway().isEmpty();
+        wifiGateway.setEnabled(gatewayReady);
+        wifiGateway.setText(gatewayReady ? "Шлюз " + router.gateway() + "  ›" : "Шлюз —");
+    }
+
+    private void openRouter() {
+        RouterLink router = MonitorService.routerLink;
+        if (router == null || router.gateway().isEmpty() || BootReceiver.mobileOnly(this)) return;
+        try {
+            startActivity(router.browserIntent());
+        } catch (android.content.ActivityNotFoundException error) {
+            android.widget.Toast.makeText(this, "Для открытия шлюза нужен браузер",
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 
     private TextView readingCard(LinearLayout row, String address, String protocol) {

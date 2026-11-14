@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
+import android.net.LinkProperties;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Handler;
@@ -61,6 +62,8 @@ public final class MonitorService extends Service {
     private final RadioInfo radio = new RadioInfo();
     private Network selected;
     static Network probeNetwork;
+    private LinkProperties linkProperties;
+    static RouterLink routerLink;
 
     private boolean mobileOnly;
     private boolean registered;
@@ -78,6 +81,15 @@ public final class MonitorService extends Service {
 
         @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
             if (network.equals(selected)) updateTransport(capabilities);
+        }
+
+        @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+            if (!network.equals(selected)) return;
+            linkProperties = properties;
+            if ("Wi-Fi".equals(transport)) {
+                routerLink = RouterLink.from(properties);
+                notifications.notify(NOTIFICATION_ID, notification(shown));
+            }
         }
 
         @Override public void onLost(Network network) {
@@ -130,6 +142,8 @@ public final class MonitorService extends Service {
     }
 
     private void select(Network network) {
+        linkProperties = null;
+        routerLink = null;
         selected = network;
         probeNetwork = network;
         generation++;
@@ -146,6 +160,7 @@ public final class MonitorService extends Service {
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transport = "Мобильная сеть";
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transport = "Ethernet";
         else transport = "Другая сеть";
+        routerLink = "Wi-Fi".equals(transport) ? RouterLink.from(linkProperties) : null;
         publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs(), snapshot.standard(), snapshot.dbm());
     }
 
@@ -242,6 +257,28 @@ public final class MonitorService extends Service {
     private Notification notification(Status status) {
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        RouterLink wifi = routerLink;
+        if (wifi != null) {
+            String title = "Получение IP-адреса Wi-Fi…";
+            String text = status.title;
+            if (!wifi.address().isEmpty()) {
+                title = wifi.gateway().isEmpty() ? "Шлюз Wi-Fi не найден" : "Открыть настройки роутера";
+                text = "IP " + wifi.address() + (wifi.gateway().isEmpty() ? "" : " · Шлюз " + wifi.gateway());
+                if (!wifi.gateway().isEmpty()) {
+                    open = PendingIntent.getActivity(this, 1, wifi.browserIntent(), PendingIntent.FLAG_IMMUTABLE);
+                }
+            }
+            return new Notification.Builder(this, CHANNEL)
+                    .setSmallIcon(status.icon)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setStyle(new Notification.BigTextStyle().bigText(text + "\n" + status.title))
+                    .setContentIntent(open)
+                    .setShowWhen(false)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build();
+        }
         String detail;
         switch (status) {
             case FULL: detail = "Доступен 8.8.8.8:53"; break;
@@ -265,6 +302,7 @@ public final class MonitorService extends Service {
         destroyed = true;
         snapshot = null;
         probeNetwork = null;
+        routerLink = null;
         if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
