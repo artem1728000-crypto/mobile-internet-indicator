@@ -57,6 +57,7 @@ public final class MonitorService extends Service {
     private final Runnable poll = this::poll;
     private ConnectivityManager connectivity;
     private NotificationManager notifications;
+    private HistoryStore history;
     private Network selected;
     private boolean mobileOnly;
     private boolean registered;
@@ -83,6 +84,7 @@ public final class MonitorService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        history = new HistoryStore(this);
         notifications = getSystemService(NotificationManager.class);
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL, "Состояние мобильного интернета", NotificationManager.IMPORTANCE_LOW);
@@ -97,6 +99,7 @@ public final class MonitorService extends Service {
     private void configure() {
         if (registered) connectivity.unregisterNetworkCallback(callback);
         mobileOnly = BootReceiver.mobileOnly(this);
+        history.separate();
         select(null);
         if (!mobileOnly) {
             connectivity.registerDefaultNetworkCallback(callback, main);
@@ -130,7 +133,7 @@ public final class MonitorService extends Service {
         transport = network == null ? "Нет подключения" : "Определение сети…";
         shown = network == null ? Status.NONE : Status.CHECKING;
         publish(0, -1, -1);
-        if (network != null) schedule(0);
+        schedule(network == null ? 2500 : 0);
     }
 
     private void updateTransport(NetworkCapabilities caps) {
@@ -149,7 +152,13 @@ public final class MonitorService extends Service {
 
     private void poll() {
         Network network = selected;
-        if (network == null || runningProbe) return;
+        if (network == null) {
+            history.observe(System.currentTimeMillis(), HistoryStore.NONE,
+                    mobileOnly ? "Мобильная сеть" : "Нет подключения");
+            schedule(INTERVAL_MS);
+            return;
+        }
+        if (runningProbe) return;
         int probeGeneration = generation;
         runningProbe = true;
         worker.execute(() -> {
@@ -173,7 +182,13 @@ public final class MonitorService extends Service {
                 } else {
                     confirmation = measured;
                 }
-                publish(System.currentTimeMillis(), externalMs, yandexMs);
+                long now = System.currentTimeMillis();
+                if (confirmation == null) {
+                    String state = shown == Status.FULL ? HistoryStore.FULL
+                            : shown == Status.LIMITED ? HistoryStore.LIMITED : HistoryStore.NONE;
+                    history.observe(now, state, transport);
+                }
+                publish(now, externalMs, yandexMs);
                 schedule(INTERVAL_MS);
             });
         });
@@ -242,6 +257,7 @@ public final class MonitorService extends Service {
         if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
+        history.close();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }

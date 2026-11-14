@@ -78,6 +78,10 @@ public final class MainActivity extends Activity {
         check.setText("Проверить сейчас");
         check.setOnClickListener(view -> command(MonitorService.ACTION_REFRESH));
         layout.addView(check);
+        Button history = new Button(this);
+        history.setText("История по дням");
+        history.setOnClickListener(view -> startActivity(new Intent(this, HistoryActivity.class)));
+        layout.addView(history);
          start = new Button(this);
         start.setOnClickListener(view -> enable());
         layout.addView(start);
