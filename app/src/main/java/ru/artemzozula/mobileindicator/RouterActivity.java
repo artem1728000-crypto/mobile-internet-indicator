@@ -54,7 +54,7 @@ public final class RouterActivity extends Activity {
     private String tendaPassword;
     private int tendaAttempt;
     private int tendaSession;
-    private boolean tendaClickedStart, tendaClickedWifi;
+    private int tendaStep;
     private android.widget.Button tendaButton;
     private ConnectivityManager.NetworkCallback callback;
 
@@ -181,7 +181,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                "Подключись к заводской сети RX2 PRO и отключи WAN. Помощник заполнит пароль Wi-Fi. Перед сохранением проверь тип подключения: DHCP.",
+                "Подключись к заводской сети RX2 PRO и отключи WAN. Помощник проверит DHCP, заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
@@ -198,8 +198,7 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             tendaPassword = value;
             tendaAttempt = 0;
-            tendaClickedStart = false;
-            tendaClickedWifi = false;
+            tendaStep = 0;
             tendaButton.setText("Остановить помощник");
             runTenda(++tendaSession);
         });
@@ -207,8 +206,8 @@ public final class RouterActivity extends Activity {
 
     private void runTenda(int session) {
         if (session != tendaSession || isFinishing() || isDestroyed() || tendaPassword == null) return;
-        if (tendaAttempt++ >= 20 || !network.equals(findWifi())) {
-            finishTenda("Шаг не распознан. Продолжи вручную или запусти помощник на экране Wi-Fi.");
+        if (tendaAttempt++ >= 30 || !network.equals(findWifi())) {
+            finishTenda("Шаг не распознан. Продолжи вручную. Шаг: " + (tendaStep + 1) + ".");
             return;
         }
         String url = browser.getUrl();
@@ -218,14 +217,20 @@ public final class RouterActivity extends Activity {
         }
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
-        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, !tendaClickedStart, !tendaClickedWifi), result -> {
+        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
-            if ("\"filled\"".equals(result)) {
-                finishTenda("Пароль заполнен. Проверь имя сети и DHCP перед сохранением.");
+            if ("\"wan\"".equals(result) || "\"password\"".equals(result)) {
+                finishTenda("\"wan\"".equals(result) ? "Не удалось подтвердить DHCP. Проверь тип WAN вручную."
+                        : "Поле пароля уже заполнено или значение изменилось. Проверь Wi-Fi вручную.");
                 return;
             }
-            if ("\"started\"".equals(result)) tendaClickedStart = true;
-            if ("\"wifi\"".equals(result)) tendaClickedWifi = true;
+            if ("\"advance\"".equals(result)) {
+                tendaAttempt = 0;
+                if (++tendaStep == 8) {
+                    finishTenda("Нажато «Завершить». После применения подключись к настроенной сети.");
+                    return;
+                }
+            }
             browser.postDelayed(() -> runTenda(session), 500);
         });
     }
