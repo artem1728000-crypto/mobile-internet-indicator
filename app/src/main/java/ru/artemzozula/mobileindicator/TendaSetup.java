@@ -54,6 +54,8 @@ final class TendaSetup {
                         if (!visible(byId('pwd-val')) || byId('pwd-val').value !== %s) return 'password';
                         return click('wifiset-page-next', /^далее$/i);
                     case 8:
+                        return visible(byId('complete')) ? 'ready-to-save' : 'wait';
+                    case 9:
                         return click('complete', /^завершить$/i);
                     case 10: {
                         const field = byId('pwd');
@@ -65,9 +67,10 @@ final class TendaSetup {
                     }
                     case 11: {
                         if (byId('double-val-check')) return 'advance';
-                        const link = Array.from(document.querySelectorAll('a,button,[role=button],li,div,span'))
-                            .find(e => visible(e) && /^настройки wi-fi$/i.test(e.textContent.trim())
-                                && !Array.from(e.children).some(child => child.textContent.trim() === e.textContent.trim()));
+                        const matches = e => visible(e) && /^настройки\\s+wi[\\s\\u2010-\\u2015-]*fi$/i
+                            .test((e.textContent || '').trim());
+                        const link = Array.from(document.querySelectorAll('body *'))
+                            .find(e => matches(e) && !Array.from(e.children).some(matches));
                         if (!link) return 'wait';
                         link.click();
                         return 'advance';

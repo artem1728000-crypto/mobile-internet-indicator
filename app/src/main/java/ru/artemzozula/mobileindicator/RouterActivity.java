@@ -56,6 +56,7 @@ public final class RouterActivity extends Activity {
     private int tendaAttempt;
     private int tendaSession;
     private int tendaStep;
+    private String tendaSsid;
     private android.widget.Button tendaButton;
     private ConnectivityManager.NetworkCallback callback;
 
@@ -222,6 +223,7 @@ public final class RouterActivity extends Activity {
             tendaPassword = value;
             tendaAttempt = 0;
             tendaStep = merge ? 10 : 0;
+            tendaSsid = null;
             tendaButton.setText("Остановить помощник");
             runTenda(++tendaSession);
         });
@@ -242,6 +244,11 @@ public final class RouterActivity extends Activity {
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
+            if ("\"ready-to-save\"".equals(result) && tendaStep == 8) {
+                tendaStep = 9;
+                tendaAttempt = 0;
+                if (tendaSsid != null && offerWifiSave(tendaSsid)) return;
+            }
             if ("\"manual-save\"".equals(result)) {
                 finishTenda("Диапазоны объединены в форме. Нажми «Сохранить» на странице роутера.");
                 return;
@@ -251,7 +258,7 @@ public final class RouterActivity extends Activity {
                     String ssid = ((String) new JSONTokener(result).nextValue()).substring(5);
                     tendaStep++;
                     tendaAttempt = 0;
-                    if (offerWifiSave(ssid)) return;
+                    tendaSsid = ssid;
                 } catch (org.json.JSONException ignored) {
                     finishTenda("Не удалось прочитать имя Wi-Fi.");
                     return;
@@ -264,7 +271,7 @@ public final class RouterActivity extends Activity {
             }
             if ("\"advance\"".equals(result)) {
                 tendaAttempt = 0;
-                if (++tendaStep == 9 || tendaStep == 14) {
+                if (++tendaStep == 10 || tendaStep == 14) {
                     finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
                     return;
                 }
