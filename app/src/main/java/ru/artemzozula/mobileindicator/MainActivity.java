@@ -60,16 +60,16 @@ public final class MainActivity extends Activity {
 
         RadioGroup mode = new RadioGroup(this);
         RadioButton active = new RadioButton(this);
-        active.setId(1);
+        active.setId(android.view.View.generateViewId());
         active.setText("Активное подключение (Wi-Fi или SIM)");
         mode.addView(active);
         RadioButton mobile = new RadioButton(this);
-        mobile.setId(2);
+        mobile.setId(android.view.View.generateViewId());
         mobile.setText("Только мобильная сеть (SIM этого телефона)");
         mode.addView(mobile);
-        mode.check(BootReceiver.mobileOnly(this) ? 2 : 1);
+        mode.check(BootReceiver.mobileOnly(this) ? mobile.getId() : active.getId());
         mode.setOnCheckedChangeListener((group, checked) -> {
-            BootReceiver.setMobileOnly(this, checked == 2);
+            BootReceiver.setMobileOnly(this, checked == mobile.getId());
             command(MonitorService.ACTION_MODE);
         });
         layout.addView(mode);
