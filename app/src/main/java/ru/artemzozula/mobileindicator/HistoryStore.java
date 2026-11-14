@@ -17,17 +17,20 @@ final class HistoryStore extends SQLiteOpenHelper {
     private String previousNetwork;
 
     HistoryStore(Context context) {
-        super(context, "connection-history.db", null, 1);
+        super(context, "connection-history.db", null, 2);
     }
 
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE periods (_id INTEGER PRIMARY KEY, start INTEGER NOT NULL,"
-                + " finish INTEGER NOT NULL, state TEXT NOT NULL, network TEXT NOT NULL)");
+                + " finish INTEGER NOT NULL, state TEXT NOT NULL, network TEXT NOT NULL, min_dbm INTEGER, max_dbm INTEGER)");
         db.execSQL("CREATE INDEX periods_finish ON periods(finish)");
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        throw new IllegalStateException("Missing history migration");
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE periods ADD COLUMN min_dbm INTEGER");
+            db.execSQL("ALTER TABLE periods ADD COLUMN max_dbm INTEGER");
+        }
     }
 
     void separate() {
@@ -35,6 +38,10 @@ final class HistoryStore extends SQLiteOpenHelper {
     }
 
     void observe(long now, String state, String network) {
+        observe(now, state, network, Integer.MAX_VALUE);
+    }
+
+    void observe(long now, String state, String network, int dbm) {
         SQLiteDatabase db = getWritableDatabase();
         long gap = now - last;
         boolean contiguous = currentId >= 0 && gap >= 0 && gap <= MAX_GAP_MS;
@@ -53,6 +60,11 @@ final class HistoryStore extends SQLiteOpenHelper {
                 row.put("network", network);
                 currentId = db.insertOrThrow("periods", null, row);
             }
+            if (dbm != Integer.MAX_VALUE) {
+                db.execSQL("UPDATE periods SET min_dbm = min(coalesce(min_dbm, ?), ?),"
+                        + " max_dbm = max(coalesce(max_dbm, ?), ?) WHERE _id = ?",
+                        new Object[]{dbm, dbm, dbm, dbm, currentId});
+            }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -64,7 +76,7 @@ final class HistoryStore extends SQLiteOpenHelper {
 
     Cursor between(long start, long end) {
         return getReadableDatabase().rawQuery(
-                "SELECT start, finish, state, network FROM periods WHERE finish>? AND start<? ORDER BY start, _id",
+                "SELECT start, finish, state, network, min_dbm, max_dbm FROM periods WHERE finish>? AND start<? ORDER BY start, _id",
                 new String[]{Long.toString(start), Long.toString(end)});
     }
 }

@@ -150,7 +150,12 @@ public final class HistoryActivity extends Activity {
                     case HistoryStore.LIMITED: limited += duration; break;
                     default: none += duration;
                 }
-                append(periods, from, to, status + " · " + rows.getString(3), endOfDay);
+                String label = status + " · " + rows.getString(3);
+                if (!rows.isNull(4) && from == rows.getLong(0) && to == rows.getLong(1)) {
+                    int min = rows.getInt(4), max = rows.getInt(5);
+                    label += " · " + min + (min == max ? "" : "…" + max) + " дБм";
+                }
+                append(periods, from, to, label, endOfDay);
                 cursor = to;
             }
         }

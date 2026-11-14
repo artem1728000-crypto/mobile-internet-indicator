@@ -85,6 +85,7 @@ public final class MainActivity extends Activity {
         Ui.add(page, Ui.text(this, "Для Wi-Fi и раздачи выбери активную сеть.", 13, Ui.MUTED, false), 8);
         monitor = Ui.button(this, "", false, this::toggle);
         Ui.add(page, monitor, 16);
+        Ui.add(page, Ui.button(this, "Радиосеть", false, this::showRadio), 8);
         updates = Ui.button(this, "Проверить обновления", false, () -> {
             if (availableRelease != null) showRelease(availableRelease);
             else checkRelease(true);
@@ -97,6 +98,24 @@ public final class MainActivity extends Activity {
             getPreferences(MODE_PRIVATE).edit().putBoolean("opened", true).apply();
             enable();
         }
+    }
+
+    private void showRadio() {
+        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            new AlertDialog.Builder(this).setTitle("Радиосеть")
+                    .setMessage("Разрешение «Телефон» нужно для чтения стандарта сети и сигнала SIM.")
+                    .setNegativeButton("Позже", null)
+                    .setPositiveButton("Разрешить", (dialog, button) ->
+                            requestPermissions(new String[]{Manifest.permission.READ_PHONE_STATE}, 2)).show();
+            return;
+        }
+        MonitorService.Snapshot current = MonitorService.snapshot;
+        String message = current == null || current.standard().isEmpty()
+                ? "Нет данных о радиосети. Для проверки своей SIM выбери «Только SIM» и дождись замера."
+                : current.standard() + (current.dbm() == Integer.MAX_VALUE ? "" : "\nСигнал " + current.dbm() + " дБм")
+                    + (current.standard().equals("LTE") ? "\nНет данных об агрегации" : "");
+        new AlertDialog.Builder(this).setTitle("Радиосеть").setMessage(message)
+                .setPositiveButton("ОК", null).show();
     }
 
     private void measureLatency() {
@@ -190,7 +209,9 @@ public final class MainActivity extends Activity {
         background.setCornerRadius(Ui.dp(this, 26));
         background.setStroke(Ui.dp(this, 1), Ui.LINE);
         hero.setBackground(background);
-        transport.setText(current == null ? "Мониторинг" : current.transport());
+        transport.setText(current == null ? "Мониторинг" : current.standard().isEmpty()
+                ? current.transport() : current.standard() + (current.dbm() == Integer.MAX_VALUE
+                ? "" : " · " + current.dbm() + " дБм"));
         transport.setTextColor(accent);
         signal.show(icon, accent);
         headline.setText(current == null ? (enabled ? "Запуск наблюдения…" : "Наблюдение на паузе") : current.status());
@@ -246,6 +267,7 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == 1 && notificationsAvailable()) enable();
+        if (request == 2) command(MonitorService.ACTION_REFRESH);
         needsRender = true;
     }
 

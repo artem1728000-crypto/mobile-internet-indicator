@@ -35,7 +35,7 @@ public final class MonitorService extends Service {
     static Snapshot snapshot;
 
     record Snapshot(String transport, String status, int icon, long checkedAt,
-                    long externalMs, long yandexMs, boolean confirming) {}
+                    long externalMs, long yandexMs, boolean confirming, String standard, int dbm) {}
 
     private enum Status {
         NONE(R.drawable.ic_none, "Доступ не подтверждён"),
@@ -58,6 +58,7 @@ public final class MonitorService extends Service {
     private ConnectivityManager connectivity;
     private NotificationManager notifications;
     private HistoryStore history;
+    private final RadioInfo radio = new RadioInfo();
     private Network selected;
     static Network probeNetwork;
 
@@ -145,7 +146,7 @@ public final class MonitorService extends Service {
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transport = "Мобильная сеть";
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transport = "Ethernet";
         else transport = "Другая сеть";
-        publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs());
+        publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs(), snapshot.standard(), snapshot.dbm());
     }
 
     private void schedule(long delay) {
@@ -186,12 +187,14 @@ public final class MonitorService extends Service {
                     confirmation = measured;
                 }
                 long now = System.currentTimeMillis();
+                String standard = "Мобильная сеть".equals(transport) ? radio.read(this) : "";
+                int dbm = standard.isEmpty() ? Integer.MAX_VALUE : radio.strength();
                 if (confirmation == null) {
                     String state = shown == Status.FULL ? HistoryStore.FULL
                             : shown == Status.LIMITED ? HistoryStore.LIMITED : HistoryStore.NONE;
-                    history.observe(now, state, transport);
+                    history.observe(now, state, standard.isEmpty() ? transport : standard, dbm);
                 }
-                publish(now, externalMs, yandexMs);
+                publish(now, externalMs, yandexMs, standard, dbm);
                 schedule(INTERVAL_MS);
             });
         });
@@ -227,8 +230,12 @@ public final class MonitorService extends Service {
     }
 
     private void publish(long checkedAt, long externalMs, long yandexMs) {
+        publish(checkedAt, externalMs, yandexMs, "", Integer.MAX_VALUE);
+    }
+
+    private void publish(long checkedAt, long externalMs, long yandexMs, String standard, int dbm) {
         snapshot = new Snapshot(transport, shown.title, shown.icon, checkedAt, externalMs,
-                yandexMs, confirmation != null);
+                yandexMs, confirmation != null, standard, dbm);
         notifications.notify(NOTIFICATION_ID, notification(shown));
     }
 
@@ -261,6 +268,7 @@ public final class MonitorService extends Service {
         if (registered) connectivity.unregisterNetworkCallback(callback);
         main.removeCallbacksAndMessages(null);
         worker.shutdownNow();
+        radio.close();
         history.close();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
