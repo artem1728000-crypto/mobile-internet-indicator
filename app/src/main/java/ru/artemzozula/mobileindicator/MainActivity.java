@@ -23,7 +23,14 @@ import java.util.Date;
 
 public final class MainActivity extends Activity {
     private TextView transport, headline, detail, external, yandex;
-    private LinearLayout hero;
+    private LinearLayout hero, wifiCard;
+    private TextView wifiSignal, wifiFrequency, wifiChannel, wifiSpeed;
+    private final Runnable renderWifi = new Runnable() {
+        @Override public void run() {
+            updateWifi();
+            main.postDelayed(this, 2000);
+        }
+    };
     private SignalView signal;
     private Button monitor, check, activeMode, mobileMode, updates;
     private MonitorService.Snapshot rendered;
@@ -69,6 +76,16 @@ public final class MainActivity extends Activity {
         external = readingCard(readings, "8.8.8.8:53", "Открытие TCP");
         yandex = readingCard(readings, "ya.ru", "Ответ HTTPS");
         Ui.add(page, readings, 12);
+        wifiCard = Ui.column(this);
+        Ui.pad(wifiCard, 16, 14);
+        wifiCard.setBackground(Ui.shape(this, Ui.SURFACE, Ui.LINE, 18));
+        Ui.add(wifiCard, Ui.text(this, "Связь по Wi-Fi", 17, Ui.INK, true), 0);
+        wifiSignal = wifiRow("Сигнал");
+        wifiFrequency = wifiRow("Частота");
+        wifiChannel = wifiRow("Канал");
+        wifiSpeed = wifiRow("Скорость до точки доступа");
+        wifiCard.setVisibility(android.view.View.GONE);
+        Ui.add(page, wifiCard, 12);
         check = Ui.button(this, "Проверить сейчас", true, () -> command(MonitorService.ACTION_REFRESH));
         Ui.add(page, check, 14);
         Ui.add(page, Ui.button(this, "Измерить задержку DNS", false, this::measureLatency), 8);
@@ -155,6 +172,26 @@ public final class MainActivity extends Activity {
         }, "dns-latency").start();
     }
 
+    private TextView wifiRow(String label) {
+        LinearLayout row = Ui.column(this);
+        Ui.add(row, Ui.text(this, label, 12, Ui.MUTED, false), 0);
+        TextView value = Ui.text(this, "—", 16, Ui.BLUE, true);
+        Ui.add(row, value, 1);
+        Ui.add(wifiCard, row, 8);
+        return value;
+    }
+
+    private void updateWifi() {
+        WifiLink link = BootReceiver.enabled(this) && !BootReceiver.mobileOnly(this)
+                ? WifiLink.read(this, MonitorService.probeNetwork) : null;
+        wifiCard.setVisibility(link == null ? android.view.View.GONE : android.view.View.VISIBLE);
+        if (link == null) return;
+        wifiSignal.setText(link.rssi() > -127 && link.rssi() < 0 ? link.rssi() + " дБм" : "—");
+        wifiFrequency.setText(link.frequency() > 0 ? link.frequency() + " МГц" : "—");
+        wifiChannel.setText(link.channel() > 0 ? Integer.toString(link.channel()) : "—");
+        wifiSpeed.setText(link.speed() > 0 ? link.speed() + " Мбит/с" : "—");
+    }
+
     private TextView readingCard(LinearLayout row, String address, String protocol) {
         LinearLayout card = Ui.column(this);
         Ui.pad(card, 14, 13);
@@ -180,12 +217,14 @@ public final class MainActivity extends Activity {
         }
         needsRender = true;
         main.post(render);
+        main.post(renderWifi);
         if (availableRelease == null && System.currentTimeMillis() - getPreferences(MODE_PRIVATE).getLong("releaseChecked", 0)
                 >= 86_400_000L) checkRelease(false);
     }
 
     @Override protected void onPause() {
         main.removeCallbacks(render);
+        main.removeCallbacks(renderWifi);
         super.onPause();
     }
 
@@ -193,6 +232,7 @@ public final class MainActivity extends Activity {
         BootReceiver.setMobileOnly(this, mobile);
         showMode();
         command(MonitorService.ACTION_MODE);
+        updateWifi();
     }
 
     private void showMode() {
@@ -215,6 +255,7 @@ public final class MainActivity extends Activity {
         if (!needsRender && current == rendered && enabled == renderedEnabled) return;
         needsRender = false;
         rendered = current;
+        updateWifi();
         renderedEnabled = enabled;
         int icon = current == null ? R.drawable.ic_checking : current.icon();
         int accent = icon == R.drawable.ic_full ? Ui.GREEN : icon == R.drawable.ic_limited ? Ui.AMBER
@@ -260,6 +301,7 @@ public final class MainActivity extends Activity {
         } else {
             BootReceiver.setEnabled(this, false);
             stopService(new Intent(this, MonitorService.class));
+            updateWifi();
             renderSnapshot();
         }
     }
