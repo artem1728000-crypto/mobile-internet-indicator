@@ -50,6 +50,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        new java.io.File(getCacheDir(), "update.apk").delete();
         try {
             version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (PackageManager.NameNotFoundException error) {
@@ -381,14 +382,69 @@ public final class MainActivity extends Activity {
 
     private void showRelease(ReleaseCheck.Release release) {
         new AlertDialog.Builder(this).setTitle("Версия " + release.version())
-                .setMessage("Скачай APK из GitHub и открой его для установки поверх текущей версии.")
+                .setMessage("APK будет скачан в кэш приложения. Установку подтвердит Android.")
                 .setNegativeButton("Позже", null)
-                .setPositiveButton("Скачать APK", (dialog, which) -> {
-                    try {
-                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(release.download())));
-                    } catch (android.content.ActivityNotFoundException error) {
-                        android.widget.Toast.makeText(this, "Для скачивания нужен браузер", android.widget.Toast.LENGTH_LONG).show();
+                .setPositiveButton("Обновить", (dialog, which) -> installRelease(release)).show();
+    }
+
+    private void installRelease(ReleaseCheck.Release release) {
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName())));
+                android.widget.Toast.makeText(this, "Разреши установку и снова нажми «Обновить»",
+                        android.widget.Toast.LENGTH_LONG).show();
+            } catch (android.content.ActivityNotFoundException error) {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(release.download())));
+            }
+            return;
+        }
+        updates.setEnabled(false);
+        updates.setText("Скачиваем обновление…");
+        new Thread(() -> {
+            java.io.File apk = new java.io.File(getCacheDir(), "update.apk");
+            javax.net.ssl.HttpsURLConnection connection = null;
+            try {
+                connection = (javax.net.ssl.HttpsURLConnection) new java.net.URL(release.download()).openConnection();
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(15000);
+                try (java.io.InputStream input = connection.getInputStream();
+                     java.io.OutputStream output = new java.io.FileOutputStream(apk)) {
+                    byte[] buffer = new byte[8192];
+                    long size = 0;
+                    for (int count; (count = input.read(buffer)) != -1;) {
+                        size += count;
+                        if (size > 32L * 1024 * 1024) throw new java.io.IOException("APK too large");
+                        output.write(buffer, 0, count);
                     }
-                }).show();
+                }
+                android.content.pm.PackageInfo info = getPackageManager().getPackageArchiveInfo(apk.getPath(), 0);
+                if (info == null || !getPackageName().equals(info.packageName)
+                        || !release.version().equals(info.versionName)) throw new java.io.IOException("Unexpected APK");
+                runOnUiThread(() -> {
+                    updates.setEnabled(true);
+                    updates.setText("Доступно обновление " + release.version());
+                    if (isFinishing() || isDestroyed()) return;
+                    Uri uri = Uri.parse("content://" + getPackageName() + ".updates/update.apk");
+                    try {
+                        startActivityForResult(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, UpdateFile.MIME)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                .putExtra(Intent.EXTRA_RETURN_RESULT, true), 40);
+                    } catch (android.content.ActivityNotFoundException failure) {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(release.download())));
+                    }
+                });
+            } catch (java.io.IOException | RuntimeException error) {
+                apk.delete();
+                runOnUiThread(() -> {
+                    updates.setEnabled(true);
+                    updates.setText("Повторить обновление");
+                    android.widget.Toast.makeText(this, "Не удалось скачать обновление",
+                            android.widget.Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "apk-download").start();
     }
 }

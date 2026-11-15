@@ -19,7 +19,8 @@ final class TendaSetup {
                     e.click();
                     return 'advance';
                 };
-                switch (%d) {
+                const step = %d;
+                switch (step) {
                     case -1: {
                         if (visible(byId('pwd')) && visible(byId('login'))
                                 && /^вход$/i.test(byId('login').textContent.trim())) return 'login';
@@ -72,6 +73,7 @@ final class TendaSetup {
                         return visible(byId('complete')) ? 'ready-to-save' : 'wait';
                     case 9:
                         return click('complete', /^завершить$/i);
+                    case 30:
                     case 10: {
                         const field = byId('pwd');
                         if (!visible(field) || field.type !== 'password') return 'wait';
@@ -154,6 +156,27 @@ final class TendaSetup {
                     }
                     case 26:
                         return click('complete', /^завершить$/i);
+                    case 33:
+                    case 31: {
+                        const controls = Array.from(document.querySelectorAll('body *'));
+                        if (controls.some(e => visible(e) && e.matches('.sub-nav__title'))) return 'open-wan';
+                        const find = pattern => controls.find(e => visible(e) && !e.disabled
+                            && pattern.test(e.textContent.trim())
+                            && !Array.from(e.children).some(x => pattern.test(x.textContent.trim())));
+                        const web = find(/^нажмите для посещения.*веб/i);
+                        if (web) {
+                            web.click();
+                            return 'advance';
+                        }
+                        return step === 31 && find(/^далее$/i) ? clickNext() : 'wait';
+                        function clickNext() {
+                            const next = find(/^далее$/i);
+                            (next.closest('button,a,[role=button]') || next).click();
+                            return 'next-clicked';
+                        }
+                    }
+                    case 32:
+                        return document.querySelector('.sub-nav__title') ? 'open-wan' : 'wait';
                     default:
                         return 'wait';
                 }

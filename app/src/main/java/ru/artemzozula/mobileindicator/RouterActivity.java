@@ -75,6 +75,7 @@ public final class RouterActivity extends Activity {
     private int tendaStep;
     private String tendaSsid;
     private boolean directApply;
+    private boolean axNextClicked;
     private boolean applyingTenda;
     private boolean savingWifi;
     private boolean routerLost;
@@ -207,13 +208,9 @@ public final class RouterActivity extends Activity {
                 boolean signedIn = "\"settings\"".equals(result);
                 new android.app.AlertDialog.Builder(this).setTitle("Модель настроенного Tenda")
                         .setItems(new String[]{"RX2 Pro / TX2L Pro — объединить диапазоны",
-                                "AX12 Pro — ручная настройка WAN/LAN"}, (dialog, choice) -> {
+                                "AX12 Pro — открыть WAN/LAN"}, (dialog, choice) -> {
                             if (choice == 0) promptTenda(true, false, signedIn, false);
-                            else new android.app.AlertDialog.Builder(this).setTitle("AX12 Pro")
-                                    .setMessage("Войди в роутер и открой веб-версию. В «Сетевых настройках» открой «Автосогласование WAN/LAN» и выключи ползунок. Порт 1 остаётся WAN.")
-                                    .setPositiveButton("Открыть WAN/LAN", (confirm, button) ->
-                                            browser.loadUrl("http://" + gateway + "/index.html#/advance/network/auto-detect"))
-                                    .setNegativeButton("Отмена", null).show();
+                            else promptTenda(false, false, signedIn, true, true);
                         }).show();
             } else if ("\"ax-wizard\"".equals(result)) {
                 promptTenda(false, false, false, true);
@@ -230,6 +227,10 @@ public final class RouterActivity extends Activity {
     }
 
     private void promptTenda(boolean merge, boolean rx, boolean signedIn, boolean ax) {
+        promptTenda(merge, rx, signedIn, ax, false);
+    }
+
+    private void promptTenda(boolean merge, boolean rx, boolean signedIn, boolean ax, boolean wan) {
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
             return;
@@ -244,7 +245,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                ax ? "Отключи WAN. Помощник заполнит пароль. Затем отметь использование пароля Wi-Fi для входа в роутер и нажми «Далее»." : merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                wan ? "Введи пароль роутера. Помощник откроет раздел автосогласования WAN/LAN." : ax ? "Отключи WAN. Помощник заполнит пароль. Затем отметь использование пароля Wi-Fi для входа в роутер и нажми «Далее»." : merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
@@ -280,8 +281,9 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             tendaPassword = value;
             tendaAttempt = 0;
-            tendaStep = ax ? 20 : merge ? (signedIn ? 11 : 10) : 0;
+            tendaStep = wan ? (signedIn ? 31 : 30) : ax ? 20 : merge ? (signedIn ? 11 : 10) : 0;
             directApply = rx;
+            axNextClicked = false;
             tendaSsid = null;
             tendaButton.setText("Остановить помощник");
             runTenda(++tendaSession);
@@ -302,9 +304,18 @@ public final class RouterActivity extends Activity {
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
         applyingTenda = tendaStep == 25 || tendaStep == 26 || tendaStep == 9 || (directApply && tendaStep == 7);
-        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
+        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, axNextClicked && tendaStep == 31 ? 33 : tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             applyingTenda = false;
+            if ("\"next-clicked\"".equals(result)) {
+                axNextClicked = true;
+                tendaAttempt = 0;
+            }
+            if ("\"open-wan\"".equals(result)) {
+                finishTenda("Открываю автосогласование WAN/LAN.");
+                browser.loadUrl("http://" + gateway + "/index.html#/advance/network/auto-detect");
+                return;
+            }
             if ("\"ready-to-save\"".equals(result) && tendaStep == 8) {
                 tendaStep = 9;
                 tendaAttempt = 0;
