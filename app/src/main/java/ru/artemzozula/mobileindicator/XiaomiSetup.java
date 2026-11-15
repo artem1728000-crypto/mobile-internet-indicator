@@ -21,10 +21,11 @@ final class XiaomiSetup {
                     return step;
                   };
                   const fill = (step, field) => {
-                    if (password) {
+                    if (password && field.value !== password) {
                       field.value = password;
                       field.dispatchEvent(new Event('input', {bubbles: true}));
                       field.dispatchEvent(new Event('change', {bubbles: true}));
+                      return 'filled';
                     }
                     return step;
                   };
@@ -45,10 +46,11 @@ final class XiaomiSetup {
                   const wifi = find('input[name=password]');
                   if (wifi && find('input[name=name]') && find('input[name=passwd][type=checkbox]')
                       && find('button', '下一步') && find('h4', 'Wi-Fi设置')) {
-                    fill('wifi', wifi);
+                    if (fill('wifi', wifi) === 'filled') return 'wifi-validating';
                     const same = find('input[name=passwd][type=checkbox]');
                     if (!same.checked) same.click();
                     if (expected === 'apply') {
+                      if (wifi.closest('form')?.classList.contains('vf-form-invalid')) return 'wifi-validating';
                       const next = find('button', '下一步');
                       if (!next.dataset.routerClicked) {
                         next.dataset.routerClicked = '1';
@@ -61,7 +63,16 @@ final class XiaomiSetup {
                   }
                   const login = find('input[name=passwd][type=password]');
                   if (login && find('button[type=submit]', '登录') && find('span', '忘记密码')) {
-                    fill('login', login); return click('login', find('button[type=submit]', '登录'));
+                    if (fill('login', login) === 'filled') return 'login-validating';
+                    if (login.closest('form')?.classList.contains('vf-form-invalid')) return 'login-validating';
+                    return click('login', find('button[type=submit]', '登录'));
+                  }
+
+                  const web = location.pathname.match(new RegExp('^(/cgi-bin/luci/;stok=[^/]+)/web(?:/.*)?$'));
+                  if (expected === 'auto' && web && !location.pathname.endsWith('/web/setting/wan')
+                      && find('a', '常用设置')) {
+                    location.assign(location.origin + web[1] + '/web/setting/wan');
+                    return 'wan-direct';
                   }
 
                   const desktop = find('.gotoPCVersion', '前往电脑版');
