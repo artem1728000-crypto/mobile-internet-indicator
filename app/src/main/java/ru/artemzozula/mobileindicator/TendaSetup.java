@@ -22,7 +22,9 @@ final class TendaSetup {
                 switch (%d) {
                     case -1: {
                         if (visible(byId('pwd')) && visible(byId('login'))) return 'login';
-                        if (visible(byId('double-val-check')) || Array.from(document.querySelectorAll('body *'))
+                        if ((byId('double-val-check')?.type === 'checkbox' && visible(byId('wifiSSID-val')))
+                                || (byId('goPc-close') && byId('goPc-btn0'))
+                                || Array.from(document.querySelectorAll('body *'))
                                 .some(e => visible(e) && /^настройки\\s+wi[\\s\\u2010-\\u2015-]*fi$/i.test(e.textContent.trim())))
                             return 'settings';
                         if (!visible(byId('start'))) return 'wait';
@@ -77,7 +79,7 @@ final class TendaSetup {
                         return click('login', /^вход$/i);
                     }
                     case 11: {
-                        if (byId('double-val-check')) return 'advance';
+                        if (byId('double-val-check')?.type === 'checkbox' && visible(byId('wifiSSID-val'))) return 'advance';
                         const matches = e => visible(e) && /^настройки\\s+wi[\\s\\u2010-\\u2015-]*fi$/i
                             .test((e.textContent || '').trim());
                         const link = Array.from(document.querySelectorAll('body *'))
