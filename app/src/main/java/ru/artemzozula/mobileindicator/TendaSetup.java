@@ -20,6 +20,17 @@ final class TendaSetup {
                     return 'advance';
                 };
                 switch (%d) {
+                    case -1: {
+                        if (visible(byId('pwd')) && visible(byId('login'))) return 'login';
+                        if (visible(byId('double-val-check')) || Array.from(document.querySelectorAll('body *'))
+                                .some(e => visible(e) && /^настройки\\s+wi[\\s\\u2010-\\u2015-]*fi$/i.test(e.textContent.trim())))
+                            return 'settings';
+                        if (!visible(byId('start'))) return 'wait';
+                        const model = document.body.innerText;
+                        if (/\\bRX2\\s*PRO\\b/i.test(model)) return 'rx';
+                        if (/\\bTX2L\\s*PRO\\b/i.test(model)) return 'tx';
+                        return 'welcome';
+                    }
                     case 0:
                         if (!Array.from(document.querySelectorAll('h1,h2,h3'))
                                 .some(e => visible(e) && /Tenda/i.test(e.textContent))) return 'wait';

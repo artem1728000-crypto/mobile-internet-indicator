@@ -57,6 +57,7 @@ public final class RouterActivity extends Activity {
     private int tendaSession;
     private int tendaStep;
     private String tendaSsid;
+    private boolean directApply;
     private boolean applyingTenda;
     private boolean savingWifi;
     private boolean routerLost;
@@ -112,7 +113,7 @@ public final class RouterActivity extends Activity {
         Ui.add(header, actions, 6);
         tendaButton = Ui.button(this, "Tenda — настроить", true, this::promptTenda);
         Ui.add(header, tendaButton, 6);
-        Ui.add(header, Ui.button(this, "Объединить диапазоны Tenda", false, () -> promptTenda(true)), 6);
+
         Ui.add(page, header, 0);
 
         browser = new WebView(this);
@@ -174,9 +175,32 @@ public final class RouterActivity extends Activity {
         row.addView(Ui.button(this, label, false, action), params);
     }
 
-    private void promptTenda() { promptTenda(false); }
+    private void promptTenda() {
+        if (tendaPassword != null) {
+            finishTenda("Помощник остановлен.");
+            return;
+        }
+        String url = browser.getUrl();
+        if (url == null || !allowed(Uri.parse(url))) return;
+        Uri uri = Uri.parse(url);
+        String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
+        browser.evaluateJavascript(TendaSetup.script("", origin, -1), result -> {
+            if (isFinishing() || isDestroyed() || !url.equals(browser.getUrl()) || tendaPassword != null) return;
+            if ("\"login\"".equals(result) || "\"settings\"".equals(result)) {
+                promptTenda(true, false, "\"settings\"".equals(result));
+            } else if ("\"rx\"".equals(result) || "\"tx\"".equals(result)) {
+                promptTenda(false, "\"rx\"".equals(result), false);
+            } else if ("\"welcome\"".equals(result)) {
+                new android.app.AlertDialog.Builder(this).setTitle("Заводской мастер Tenda")
+                        .setItems(new String[]{"RX2 Pro", "TX2L Pro"}, (dialog, choice) ->
+                                promptTenda(false, choice == 0, false)).show();
+            } else {
+                Toast.makeText(this, "Открой приветствие или страницу входа Tenda", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
 
-    private void promptTenda(boolean merge) {
+    private void promptTenda(boolean merge, boolean rx, boolean signedIn) {
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
             return;
@@ -191,7 +215,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети TX2L Pro и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
@@ -213,7 +237,7 @@ public final class RouterActivity extends Activity {
             password.setSelection(password.length());
         }), 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-                .setTitle(merge ? "Объединение диапазонов Tenda" : "Настройка Tenda TX2L Pro").setView(content)
+                .setTitle(merge ? "Объединение диапазонов Tenda" : rx ? "Настройка Tenda RX2 Pro" : "Настройка Tenda TX2L Pro").setView(content)
                 .setNegativeButton("Отмена", null).setPositiveButton("Начать", null).create();
         dialog.show();
         dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
@@ -227,7 +251,8 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             tendaPassword = value;
             tendaAttempt = 0;
-            tendaStep = merge ? 10 : 0;
+            tendaStep = merge ? (signedIn ? 11 : 10) : 0;
+            directApply = rx;
             tendaSsid = null;
             tendaButton.setText("Остановить помощник");
             runTenda(++tendaSession);
@@ -247,7 +272,7 @@ public final class RouterActivity extends Activity {
         }
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
-        applyingTenda = tendaStep == 9;
+        applyingTenda = tendaStep == 9 || (directApply && tendaStep == 7);
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             applyingTenda = false;
@@ -278,6 +303,7 @@ public final class RouterActivity extends Activity {
             }
             if ("\"advance\"".equals(result)) {
                 tendaAttempt = 0;
+                if (directApply && tendaStep == 7) tendaStep = 9;
                 if (++tendaStep == 10 && tendaSsid != null && offerWifiSave(tendaSsid)) return;
                 if (tendaStep == 10 || tendaStep == 14) {
                     finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
