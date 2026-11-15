@@ -61,7 +61,7 @@ final class RouterJournal {
 
     synchronized String export() throws java.io.IOException, org.json.JSONException {
         if (started == null) return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-        String json = new JSONObject().put("format", 1).put("startedAt", started)
+        String json = new JSONObject().put("format", 2).put("startedAt", started)
                 .put("truncated", truncated).put("events", events).toString(2);
         android.util.AtomicFile saved = new android.util.AtomicFile(file);
         java.io.FileOutputStream output = null;
@@ -81,8 +81,20 @@ final class RouterJournal {
                 (() => {
                   if (window.__routerJournalInstalled) return;
                   window.__routerJournalInstalled = true;
+                  const safeUrl = value => {
+                    try {
+                      const url = new URL(value, location.href);
+                      const path = value => value.split('?')[0]
+                        .replace(/([;\\w-]+=)[^/;]*/g, '$1[redacted]')
+                        .replace(/[a-f0-9]{24,}/gi, '[redacted]');
+                      return {origin:url.origin, path:path(url.pathname),
+                        route:path(url.hash.slice(1)),
+                        queryKeys:[...url.searchParams.keys()].slice(0, 30)};
+                    } catch (_) { return null; }
+                  };
                   const describe = e => ({
                     tag: e.localName,
+                    link: e.matches('a[href]') ? safeUrl(e.getAttribute('href')) : null,
                     id: (e.id || '').slice(0, 80),
                     classes: (e.getAttribute('class') || '').slice(0, 120),
                     name: (e.getAttribute('name') || '').slice(0, 80),
@@ -94,7 +106,23 @@ final class RouterJournal {
                   });
                   const snapshot = () => [...document.querySelectorAll('input,select,button,a,[role=button]')]
                     .filter(e => e.getClientRects().length).slice(0, 60).map(describe);
-                  const send = data => RouterJournal.record(JSON.stringify(data));
+                  const send = data => RouterJournal.record(JSON.stringify({...data, page:safeUrl(location.href)}));
+                  let lastAddress = location.href;
+                  const navigation = () => {
+                    if (lastAddress === location.href) return;
+                    lastAddress = location.href;
+                    send({source:'page', action:'navigation', controls:snapshot()});
+                  };
+                  for (const method of ['pushState', 'replaceState']) {
+                    const original = history[method];
+                    history[method] = function(...args) {
+                      const result = original.apply(this, args);
+                      navigation();
+                      return result;
+                    };
+                  }
+                  window.addEventListener('popstate', navigation);
+                  window.addEventListener('hashchange', navigation);
                   for (const type of ['click','change','submit']) {
                     document.addEventListener(type, event => {
                       const target = event.target instanceof Element ? event.target : null;

@@ -72,10 +72,11 @@ final class XiaomiSetup {
                   const mode = document.querySelector('select#wanCheck[name=wancheckSelect]');
                   if (wan && mode && !mode.disabled) {
                     const fixed = [...mode.options].find(o => o.label.trim() === '固定WAN口');
-                    if (expected === 'auto' && fixed && mode.value !== fixed.value
-                        && find('.ipt-text.dummy', '智能选择WAN口（推荐）')) {
-                      mode.value = fixed.value;
-                      mode.dispatchEvent(new Event('change', {bubbles: true}));
+                    if (expected === 'auto' && fixed && mode.value !== fixed.value) {
+                      const choice = find('a.nowrap', '固定WAN口');
+                      if (choice) return click('wan-fixed-choice', choice);
+                      const dropdown = find('.ipt-text.dummy', '智能选择WAN口（推荐）');
+                      if (dropdown) return click('wan-mode-menu', dropdown);
                     }
                     const fixedLabel = find('.ipt-text.dummy', '固定WAN口');
                     const port = find('.wanListDiv .portsIndex', '1');
@@ -85,7 +86,7 @@ final class XiaomiSetup {
                     }
                     if (expected === 'auto') {
                       if (fixedLabel && port && !port.closest('.wanListDiv').classList.contains('active')
-                          && find('span', '保存')) port.closest('.wanListDiv').click();
+                          && find('span', '保存')) (port.closest('.wanListDiv').querySelector('.wanPortImg') || port.closest('.wanListDiv')).click();
                       (fixedLabel || find('.ipt-text.dummy', '智能选择WAN口（推荐）') || wan)
                           .scrollIntoView({block: 'center'});
                     }
