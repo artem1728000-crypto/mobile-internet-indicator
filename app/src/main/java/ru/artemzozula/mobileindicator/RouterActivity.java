@@ -28,6 +28,10 @@ public final class RouterActivity extends Activity {
     private static boolean webViewConfigured;
     private static final int SAVE = 1;
     private static final int SAVE_WIFI = 2;
+    private static final int SAVE_JOURNAL = 3;
+    private RouterJournal journal;
+    private android.widget.Button journalButton;
+    private String journalExport;
     private static final String CAPTURE = """
             (() => {
               const clean = s => (s || '').trim().replace(/\\s+/g, ' ').slice(0, 160);
@@ -84,6 +88,7 @@ public final class RouterActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        journal = new RouterJournal(this);
         gateway = getIntent().getStringExtra("gateway");
         if (state != null) capture = state.getString("capture");
         connectivity = getSystemService(ConnectivityManager.class);
@@ -102,6 +107,7 @@ public final class RouterActivity extends Activity {
                 if (lost.equals(network)) runOnUiThread(() -> {
                     if (isDestroyed() || browser == null) return;
                     routerLost = true;
+                    journal.event("network", "disconnected");
                     if (applyingTenda || savingWifi || xiaomiWaiting) return;
                     browser.stopLoading();
                     Toast.makeText(RouterActivity.this, "Связь с роутером потеряна", Toast.LENGTH_LONG).show();
@@ -134,11 +140,16 @@ public final class RouterActivity extends Activity {
         setupActions.addView(tendaButton, new LinearLayout.LayoutParams(0, -2, 1));
         addAction(setupActions, "Xiaomi — настроить", this::promptXiaomi);
         Ui.add(header, setupActions, 6);
+        journalButton = Ui.button(this, "Записать действия настройки", false, this::toggleJournal);
+        Ui.add(header, journalButton, 6);
+        if (journal.hasSaved()) Ui.add(header, Ui.button(this, "Сохранить предыдущий журнал",
+                false, this::exportJournal), 6);
 
         Ui.add(page, header, 0);
 
         browser = new WebView(this);
         browser.setSaveEnabled(false);
+        browser.addJavascriptInterface(journal, "RouterJournal");
         browser.getSettings().setJavaScriptEnabled(true);
         browser.getSettings().setDomStorageEnabled(true);
         browser.getSettings().setAllowFileAccess(false);
@@ -162,6 +173,9 @@ public final class RouterActivity extends Activity {
             }
 
             @Override public void onPageFinished(WebView view, String url) {
+                if (allowed(Uri.parse(url)) && journal.isRecording()) {
+                    browser.evaluateJavascript(journal.script(), null);
+                }
                 if (allowed(Uri.parse(url))) title.setText("Роутер · " + gateway);
             }
         });
@@ -207,6 +221,7 @@ public final class RouterActivity extends Activity {
     private String xiaomiPassword;
 
     private void promptXiaomi() {
+        journal.event("app", "xiaomi-button");
         if (xiaomiRunning) {
             xiaomiRunning = false;
             xiaomiWaiting = false;
@@ -270,6 +285,7 @@ public final class RouterActivity extends Activity {
     private void runXiaomi() {
         if (!xiaomiRunning || isFinishing() || isDestroyed() || routerLost) return;
         if (++xiaomiAttempts > 90) {
+            journal.event("xiaomi", "step-timeout");
             xiaomiRunning = false;
             Toast.makeText(this, "Не удалось завершить шаг Xiaomi. Сохрани снимок шага.", Toast.LENGTH_LONG).show();
             return;
@@ -280,9 +296,10 @@ public final class RouterActivity extends Activity {
             xiaomiReconnectAttempts = 0;
             browser.postDelayed(this::resumeXiaomiAfterReconnect, 2000);
         }
-        browser.evaluateJavascript(XiaomiSetup.script(xiaomiOrigin, xiaomiPassword,
+        evaluateRouterScript(XiaomiSetup.script(xiaomiOrigin, xiaomiPassword,
                 xiaomiPrepared ? "apply" : xiaomiVerifyWan ? "verify" : "auto"), result -> {
             if (!xiaomiRunning || isFinishing() || isDestroyed()) return;
+            journal.event("xiaomi", result != null && result.startsWith("\"ssid:") ? "wifi-form-ready" : String.valueOf(result));
             if (result != null && result.startsWith("\"ssid:")) {
                 try {
                     String ssid = ((String) new JSONTokener(result).nextValue()).substring(5);
@@ -323,6 +340,7 @@ public final class RouterActivity extends Activity {
     private void resumeXiaomiAfterReconnect() {
         if (!xiaomiWaiting || !xiaomiRunning || isFinishing() || isDestroyed()) return;
         if (++xiaomiReconnectAttempts > 180) {
+            journal.event("xiaomi", "reconnect-timeout");
             xiaomiWaiting = false;
             xiaomiRunning = false;
             applyingTenda = false;
@@ -341,6 +359,7 @@ public final class RouterActivity extends Activity {
             if (ssid != null && !ssid.equals("<unknown ssid>")
                     && !ssid.equals("\"" + xiaomiSsid + "\"") && !ssid.equals(xiaomiSsid)) continue;
             if (!connectivity.bindProcessToNetwork(candidate)) continue;
+            journal.event("network", "reconnected");
             network = candidate;
             routerLost = false;
             applyingTenda = false;
@@ -357,6 +376,7 @@ public final class RouterActivity extends Activity {
     }
 
     private void promptTenda() {
+        journal.event("app", "tenda-button");
         if (xiaomiRunning) return;
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
@@ -366,7 +386,7 @@ public final class RouterActivity extends Activity {
         if (url == null || !allowed(Uri.parse(url))) return;
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
-        browser.evaluateJavascript(TendaSetup.script("", origin, -1), result -> {
+        evaluateRouterScript(TendaSetup.script("", origin, -1), result -> {
             if (isFinishing() || isDestroyed() || !url.equals(browser.getUrl()) || tendaPassword != null) return;
             if ("\"login\"".equals(result) || "\"settings\"".equals(result)) {
                 boolean signedIn = "\"settings\"".equals(result);
@@ -461,6 +481,7 @@ public final class RouterActivity extends Activity {
             return;
         }
         if (tendaAttempt++ >= 30 || !network.equals(findWifi())) {
+            journal.event("tenda", "timeout-or-network-lost");
             finishTenda("Шаг не распознан. Продолжи вручную. Шаг: " + (tendaStep + 1) + ".");
             return;
         }
@@ -472,9 +493,10 @@ public final class RouterActivity extends Activity {
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
         applyingTenda = tendaStep == 25 || tendaStep == 26 || tendaStep == 9 || (directApply && tendaStep == 7);
-        browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, axNextClicked && tendaStep == 31 ? 33 : tendaStep), result -> {
+        evaluateRouterScript(TendaSetup.script(tendaPassword, origin, axNextClicked && tendaStep == 31 ? 33 : tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             applyingTenda = false;
+            journal.event("tenda", "step-" + tendaStep + ": " + (result != null && result.startsWith("\"ssid:") ? "wifi-form-ready" : String.valueOf(result)));
             if ("\"next-clicked\"".equals(result)) {
                 axNextClicked = true;
                 tendaAttempt = 0;
@@ -521,7 +543,7 @@ public final class RouterActivity extends Activity {
                 if (directApply && tendaStep == 7) tendaStep = 9;
                 ++tendaStep;
                 if (tendaStep == 26 && !routerLost) {
-                    browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, 26), ignored ->
+                    evaluateRouterScript(TendaSetup.script(tendaPassword, origin, 26), ignored ->
                             completeAx(session));
                     browser.postDelayed(() -> completeAx(session), 1500);
                     return;
@@ -576,6 +598,48 @@ public final class RouterActivity extends Activity {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
+    private void evaluateRouterScript(String script, android.webkit.ValueCallback<String> callback) {
+        browser.evaluateJavascript(journal.isRecording() ? journal.script() + script : script, callback);
+    }
+
+    private void toggleJournal() {
+        if (journal.isRecording()) {
+            journal.stop();
+            journalButton.setText("Записать действия настройки");
+            exportJournal();
+            return;
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("Журнал настройки")
+                .setItems(new String[]{"Начать новую запись", "Сохранить журнал"}, (dialog, which) -> {
+                    if (which == 1) { exportJournal(); return; }
+                    journal.start();
+                    journalButton.setText("Остановить и сохранить запись");
+                    String url = browser.getUrl();
+                    if (url != null && allowed(Uri.parse(url))) browser.evaluateJavascript(journal.script(), null);
+                }).show();
+    }
+
+    private void exportJournal() {
+        try {
+            journalExport = journal.export();
+            startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                    .putExtra(Intent.EXTRA_TITLE, "router-actions-" +
+                            LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".json"),
+                    SAVE_JOURNAL);
+        } catch (java.io.IOException | org.json.JSONException error) {
+            Toast.makeText(this, "Журнал ещё не записан или недоступен", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override protected void onPause() {
+        if (journal != null && journal.isRecording()) {
+            try { journal.export(); }
+            catch (java.io.IOException | org.json.JSONException ignored) { }
+        }
+        super.onPause();
+    }
+
     private void takeCapture() {
         String url = browser.getUrl();
         if (url == null || !allowed(Uri.parse(url))) return;
@@ -605,6 +669,7 @@ public final class RouterActivity extends Activity {
             savingWifi = false;
             java.util.ArrayList<Integer> codes = data == null ? null : data.getIntegerArrayListExtra(
                     android.provider.Settings.EXTRA_WIFI_NETWORK_RESULT_LIST);
+            journal.event("android", "wifi-save-result-" + result);
             boolean saved = result == RESULT_OK && codes != null && !codes.isEmpty()
                     && (codes.get(0) == android.provider.Settings.ADD_WIFI_RESULT_SUCCESS
                     || codes.get(0) == android.provider.Settings.ADD_WIFI_RESULT_ALREADY_EXISTS);
@@ -620,6 +685,18 @@ public final class RouterActivity extends Activity {
             finishTenda(saved ? "Сеть сохранена в Android. Подключись после перезапуска Wi-Fi."
                     : "Android не подтвердил сохранение. Подключись к сети вручную.");
             if (routerLost) finish();
+            return;
+        }
+        if (request == SAVE_JOURNAL) {
+            if (result == RESULT_OK && data != null && data.getData() != null && journalExport != null) {
+                try (OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
+                    if (output == null) throw new java.io.IOException("No output stream");
+                    output.write(journalExport.getBytes(StandardCharsets.UTF_8));
+                    Toast.makeText(this, "Журнал сохранён", Toast.LENGTH_LONG).show();
+                } catch (java.io.IOException | SecurityException error) {
+                    Toast.makeText(this, "Не удалось сохранить журнал. Повтори сохранение.", Toast.LENGTH_LONG).show();
+                }
+            }
             return;
         }
         if (request != SAVE) return;
