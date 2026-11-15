@@ -6,7 +6,7 @@ final class XiaomiSetup {
     private XiaomiSetup() {}
 
     static String script(String origin, String password, String expected) {
-        return """
+        return String.format("""
                 (() => {
                   if (location.origin !== %s) return 'unknown';
                   const password = %s;
@@ -76,6 +76,6 @@ final class XiaomiSetup {
                   if (settings && find('#routermodel')) return click('settings', settings);
                   return 'unknown';
                 })()
-                """.formatted(JSONObject.quote(origin), JSONObject.quote(password), JSONObject.quote(expected));
+                """, JSONObject.quote(origin), JSONObject.quote(password), JSONObject.quote(expected));
     }
 }
