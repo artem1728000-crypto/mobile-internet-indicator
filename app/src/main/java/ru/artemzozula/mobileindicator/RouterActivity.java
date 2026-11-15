@@ -130,7 +130,10 @@ public final class RouterActivity extends Activity {
         addAction(actions, "Снимок шага", this::takeCapture);
         Ui.add(header, actions, 6);
         tendaButton = Ui.button(this, "Tenda — настроить", true, this::promptTenda);
-        Ui.add(header, tendaButton, 6);
+        LinearLayout setupActions = new LinearLayout(this);
+        setupActions.addView(tendaButton, new LinearLayout.LayoutParams(0, -2, 1));
+        addAction(setupActions, "Xiaomi — настроить", this::promptXiaomi);
+        Ui.add(header, setupActions, 6);
 
         Ui.add(page, header, 0);
 
@@ -191,6 +194,74 @@ public final class RouterActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
         if (row.getChildCount() != 0) params.setMarginStart(Ui.dp(this, 5));
         row.addView(Ui.button(this, label, false, action), params);
+    }
+
+    private void promptXiaomi() {
+        if (tendaPassword != null || savingWifi || routerLost) return;
+        Uri url = Uri.parse(browser.getUrl() == null ? "" : browser.getUrl());
+        if (!allowed(url)) return;
+        String origin = url.getScheme() + "://" + url.getEncodedAuthority();
+        browser.evaluateJavascript(XiaomiSetup.script(origin, "", ""), result -> {
+            if (isFinishing() || isDestroyed() || routerLost || result == null) return;
+            switch (result) {
+                case "\"welcome\"" -> runXiaomi(origin, "welcome", "",
+                        "Проверь условия и участие в программе улучшения, затем нажми «马上体验» (Начать).");
+                case "\"offline\"" -> runXiaomi(origin, "offline", "", "Продолжаем без WAN-кабеля.");
+                case "\"dhcp\"" -> new android.app.AlertDialog.Builder(this)
+                        .setTitle("Подключение Xiaomi")
+                        .setMessage("Выбрать автоматическое получение IP (DHCP)?")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Выбрать DHCP", (dialog, which) -> runXiaomi(origin, "dhcp", "", ""))
+                        .show();
+                case "\"wifi\"" -> promptXiaomiPassword(origin, true);
+                case "\"login\"" -> promptXiaomiPassword(origin, false);
+                case "\"more\"" -> runXiaomi(origin, "more", "", "");
+                case "\"desktop\"" -> runXiaomi(origin, "desktop", "", "");
+                case "\"settings\"" -> runXiaomi(origin, "settings", "", "");
+                case "\"internet\"" -> runXiaomi(origin, "internet", "", "");
+                case "\"wan\"" -> runXiaomi(origin, "wan", "",
+                        "Проверь, что выбран «固定WAN口» (Фиксированный WAN) и порт 1 отмечен как WAN. Если выбор не отобразился, укажи режим и порт вручную. Затем нажми «保存» (Сохранить).");
+                default -> Toast.makeText(this, "Экран Xiaomi не распознан. Можно сохранить снимок шага.",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void promptXiaomiPassword(String origin, boolean wifi) {
+        android.widget.EditText password = new android.widget.EditText(this);
+        password.setSingleLine(true);
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle(wifi ? "Пароль Wi-Fi Xiaomi" : "Пароль администратора Xiaomi")
+                .setView(password)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Заполнить", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
+                    String value = password.getText().toString();
+                    if (value.trim().isEmpty() || (wifi && (value.length() < 8 || value.length() > 63))) {
+                        password.setError(wifi ? "Введи от 8 до 63 символов" : "Введи пароль");
+                        return;
+                    }
+                    dialog.dismiss();
+                    runXiaomi(origin, wifi ? "wifi" : "login", value, wifi
+                            ? "Проверь имя Wi-Fi и галочку «将Wi-Fi密码作为路由器管理密码», если хочешь использовать тот же пароль для входа. Нажми «下一步» (Далее) и подключись к защищённой сети."
+                            : "Нажми «登录» (Войти).");
+                }));
+        dialog.show();
+    }
+
+    private void runXiaomi(String origin, String step, String password, String hint) {
+        if (isFinishing() || isDestroyed() || routerLost) return;
+        browser.evaluateJavascript(XiaomiSetup.script(origin, password, step), result -> {
+            if (isFinishing() || isDestroyed() || routerLost) return;
+            String message = ("\"" + step + "\"").equals(result) ? hint
+                    : "Страница изменилась. Нажми «Xiaomi — настроить» ещё раз.";
+            if (!message.isEmpty()) new android.app.AlertDialog.Builder(this)
+                    .setTitle("Настройка Xiaomi").setMessage(message).setPositiveButton("OK", null).show();
+        });
     }
 
     private void promptTenda() {
