@@ -144,21 +144,20 @@ final class TendaSetup {
                         return 'advance';
                     }
                     case 25: {
-                        const accountPassword = byId('login-pwd-val');
-                        const checked = Array.from(document.querySelectorAll('input[type=checkbox]:checked,[aria-checked=true]'))
-                            .some(e => /пароль.*уч[её]тной записи/i.test(e.closest('label')?.textContent
-                                || e.labels?.[0]?.textContent || e.getAttribute('aria-label') || ''));
-                        if (!checked && (!accountPassword || visible(accountPassword))) return 'ax-review';
-                        const buttons = Array.from(document.querySelectorAll('button,[role=button],input[type=submit]'))
-                            .filter(e => visible(e) && !e.disabled && /^далее$/i.test((e.value || e.textContent).trim()));
+                        const field = byId('pwd-val');
+                        if (!visible(field) || field.value !== %s) return 'password';
+                        const buttons = Array.from(document.querySelectorAll('.wifi-set__btn-group button.button--primary'))
+                            .filter(e => visible(e) && !e.disabled && /^далее$/i.test(e.textContent.trim()));
                         if (buttons.length !== 1) return 'wait';
                         buttons[0].click();
                         return 'advance';
                     }
+                    case 26:
+                        return click('complete', /^завершить$/i);
                     default:
                         return 'wait';
                 }
             })()
-            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password));
+            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password));
     }
 }

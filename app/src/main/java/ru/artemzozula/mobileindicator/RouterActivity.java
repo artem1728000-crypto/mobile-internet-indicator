@@ -35,6 +35,7 @@ public final class RouterActivity extends Activity {
                 headings: Array.from(document.querySelectorAll('h1,h2,h3')).slice(0, 40)
                   .map(e => clean(e.textContent)),
                 uiElements: Array.from(document.querySelectorAll('body *')).filter(e => {
+                  if (e.closest('.config-mess,.config-row,.config-value')) return false;
                   if (!e.getClientRects().length || getComputedStyle(e).visibility !== 'visible'
                       || e.closest('[hidden],[aria-hidden="true"]')) return false;
                   return e.matches('button,input,select,a,label,[role],[tabindex],[onclick]')
@@ -210,7 +211,9 @@ public final class RouterActivity extends Activity {
                             if (choice == 0) promptTenda(true, false, signedIn, false);
                             else new android.app.AlertDialog.Builder(this).setTitle("AX12 Pro")
                                     .setMessage("Войди в роутер и открой веб-версию. В «Сетевых настройках» открой «Автосогласование WAN/LAN» и выключи ползунок. Порт 1 остаётся WAN.")
-                                    .setPositiveButton("ОК", null).show();
+                                    .setPositiveButton("Открыть WAN/LAN", (confirm, button) ->
+                                            browser.loadUrl("http://" + gateway + "/index.html#/advance/network/auto-detect"))
+                                    .setNegativeButton("Отмена", null).show();
                         }).show();
             } else if ("\"ax-wizard\"".equals(result)) {
                 promptTenda(false, false, false, true);
@@ -298,7 +301,7 @@ public final class RouterActivity extends Activity {
         }
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
-        applyingTenda = tendaStep == 25 || tendaStep == 9 || (directApply && tendaStep == 7);
+        applyingTenda = tendaStep == 25 || tendaStep == 26 || tendaStep == 9 || (directApply && tendaStep == 7);
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             applyingTenda = false;
@@ -335,6 +338,12 @@ public final class RouterActivity extends Activity {
                 tendaAttempt = 0;
                 if (directApply && tendaStep == 7) tendaStep = 9;
                 ++tendaStep;
+                if (tendaStep == 26 && !routerLost) {
+                    browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, 26), ignored ->
+                            completeAx(session));
+                    browser.postDelayed(() -> completeAx(session), 1500);
+                    return;
+                }
                 if ((tendaStep == 10 || tendaStep == 26) && tendaSsid != null && offerWifiSave(tendaSsid)) return;
                 if (tendaStep == 10 || tendaStep == 14 || tendaStep == 26) {
                     finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
@@ -344,6 +353,13 @@ public final class RouterActivity extends Activity {
             if (routerLost) finish();
             else browser.postDelayed(() -> runTenda(session), 500);
         });
+    }
+
+    private void completeAx(int session) {
+        if (session != tendaSession || tendaStep != 26 || isFinishing() || isDestroyed()) return;
+        tendaStep = 27;
+        if (tendaSsid != null && offerWifiSave(tendaSsid)) return;
+        finishTenda("Настройки отправлены. Подключись к защищённой сети после перезапуска.");
     }
 
     private boolean offerWifiSave(String ssid) {
