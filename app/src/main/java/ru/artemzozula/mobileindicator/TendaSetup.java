@@ -177,6 +177,9 @@ final class TendaSetup {
                     }
                     case 32:
                         return document.querySelector('.sub-nav__title') ? 'open-wan' : 'wait';
+                    case 34:
+                        return document.querySelector('.page-title')?.textContent.trim() === 'Автосогласование WAN/LAN'
+                            ? 'wan-ready' : 'wait';
                     default:
                         return 'wait';
                 }

@@ -292,6 +292,10 @@ public final class RouterActivity extends Activity {
 
     private void runTenda(int session) {
         if (session != tendaSession || isFinishing() || isDestroyed() || tendaPassword == null) return;
+        if (tendaStep == 32 && tendaAttempt >= 8 && network.equals(findWifi())) {
+            openWan(session);
+            return;
+        }
         if (tendaAttempt++ >= 30 || !network.equals(findWifi())) {
             finishTenda("Шаг не распознан. Продолжи вручную. Шаг: " + (tendaStep + 1) + ".");
             return;
@@ -312,8 +316,11 @@ public final class RouterActivity extends Activity {
                 tendaAttempt = 0;
             }
             if ("\"open-wan\"".equals(result)) {
-                finishTenda("Открываю автосогласование WAN/LAN.");
-                browser.loadUrl("http://" + gateway + "/index.html#/advance/network/auto-detect");
+                openWan(session);
+                return;
+            }
+            if ("\"wan-ready\"".equals(result)) {
+                finishTenda("Раздел WAN/LAN открыт. Ползунок можно выключить вручную.");
                 return;
             }
             if ("\"ready-to-save\"".equals(result) && tendaStep == 8) {
@@ -364,6 +371,13 @@ public final class RouterActivity extends Activity {
             if (routerLost) finish();
             else browser.postDelayed(() -> runTenda(session), 500);
         });
+    }
+
+    private void openWan(int session) {
+        tendaStep = 34;
+        tendaAttempt = 0;
+        browser.loadUrl("http://" + gateway + "/index.html#/advance/network/auto-detect");
+        browser.postDelayed(() -> runTenda(session), 700);
     }
 
     private void completeAx(int session) {
