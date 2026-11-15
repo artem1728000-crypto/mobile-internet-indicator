@@ -57,7 +57,7 @@ public final class MainActivity extends Activity {
             throw new IllegalStateException(error);
         }
         LinearLayout page = Ui.screen(this);
-        Ui.add(page, Ui.text(this, "Мобильный интернет", 29, Ui.INK, true), 0);
+        Ui.add(page, Ui.text(this, "Мастер роутеров", 29, Ui.INK, true), 0);
         hero = Ui.column(this);
         hero.setGravity(Gravity.CENTER_HORIZONTAL);
         Ui.pad(hero, 18, 20);
