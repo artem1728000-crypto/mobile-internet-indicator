@@ -599,7 +599,9 @@ public final class RouterActivity extends Activity {
     }
 
     private void evaluateRouterScript(String script, android.webkit.ValueCallback<String> callback) {
-        browser.evaluateJavascript(journal.isRecording() ? journal.script() + script : script, callback);
+        String recorded = journal.script() + "(() => { window.__routerAssistantAction = true; try { return ("
+                + script + "); } finally { window.__routerAssistantAction = false; } })()";
+        browser.evaluateJavascript(journal.isRecording() ? recorded : script, callback);
     }
 
     private void toggleJournal() {

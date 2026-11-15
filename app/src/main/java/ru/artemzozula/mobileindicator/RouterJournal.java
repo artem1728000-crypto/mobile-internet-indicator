@@ -100,7 +100,7 @@ final class RouterJournal {
                       const target = event.target instanceof Element ? event.target : null;
                       if (!target) return;
                       const control = target.closest('button,a,input,select,label,[role=button],li') || target;
-                      send({source: event.isTrusted ? 'user' : 'script', action: type,
+                      send({source: window.__routerAssistantAction ? 'assistant' : event.isTrusted ? 'user' : 'script', action: type,
                         target: describe(control), parent: control.parentElement ? describe(control.parentElement) : null,
                         controls: snapshot()});
                     }, true);
