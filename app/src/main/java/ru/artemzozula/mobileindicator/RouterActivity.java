@@ -291,7 +291,7 @@ public final class RouterActivity extends Activity {
             return;
         }
         applyingTenda = xiaomiPrepared;
-        if (xiaomiPrepared) {
+        if (xiaomiPrepared && !xiaomiWaiting) {
             xiaomiWaiting = true;
             xiaomiReconnectAttempts = 0;
             browser.postDelayed(this::resumeXiaomiAfterReconnect, 2000);
@@ -332,7 +332,7 @@ public final class RouterActivity extends Activity {
                 Toast.makeText(this, "WAN-порт 1 закреплён. Можно подключить кабель от оптического терминала.", Toast.LENGTH_LONG).show();
                 return;
             }
-            browser.postDelayed(this::runXiaomi, 1000);
+            browser.postDelayed(this::runXiaomi, 1500);
         });
     }
 

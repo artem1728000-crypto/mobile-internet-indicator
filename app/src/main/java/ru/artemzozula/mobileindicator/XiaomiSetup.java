@@ -22,12 +22,19 @@ final class XiaomiSetup {
                   };
                   const fill = (step, field) => {
                     if (password && field.value !== password) {
+                      field.dataset.routerFilledAt = String(Date.now());
                       field.value = password;
                       field.dispatchEvent(new Event('input', {bubbles: true}));
                       field.dispatchEvent(new Event('change', {bubbles: true}));
                       return 'filled';
                     }
                     return step;
+                  };
+
+                  const ready = field => {
+                    const filledAt = Number(field.dataset.routerFilledAt || 0);
+                    return Date.now() - filledAt >= 2000
+                        && field.value === password && field.validity.valid;
                   };
 
                   const start = find('a.button', '马上体验');
@@ -50,7 +57,7 @@ final class XiaomiSetup {
                     const same = find('input[name=passwd][type=checkbox]');
                     if (!same.checked) same.click();
                     if (expected === 'apply') {
-                      if (wifi.closest('form')?.classList.contains('vf-form-invalid')) return 'wifi-validating';
+                      if (!ready(wifi)) return 'wifi-validating';
                       const next = find('button', '下一步');
                       if (!next.dataset.routerClicked) {
                         next.dataset.routerClicked = '1';
@@ -64,7 +71,7 @@ final class XiaomiSetup {
                   const login = find('input[name=passwd][type=password]');
                   if (login && find('button[type=submit]', '登录') && find('span', '忘记密码')) {
                     if (fill('login', login) === 'filled') return 'login-validating';
-                    if (login.closest('form')?.classList.contains('vf-form-invalid')) return 'login-validating';
+                    if (!ready(login)) return 'login-validating';
                     return click('login', find('button[type=submit]', '登录'));
                   }
 
