@@ -9,19 +9,20 @@ final class TendaSetup {
         return String.format(java.util.Locale.ROOT, """
             (() => {
                 if (location.origin !== %s) return 'wait';
-                const visible = e => e && !e.disabled && e.getClientRects().length
+                const visible = e => e && e.getClientRects().length
                     && getComputedStyle(e).visibility === 'visible'
                     && !e.closest('[hidden],[aria-hidden="true"]');
                 const byId = id => document.getElementById(id);
                 const click = (id, label) => {
                     const e = byId(id);
-                    if (!visible(e) || !label.test(e.textContent.trim())) return 'wait';
+                    if (!visible(e) || e.disabled || !label.test(e.textContent.trim())) return 'wait';
                     e.click();
                     return 'advance';
                 };
                 switch (%d) {
                     case -1: {
-                        if (visible(byId('pwd')) && visible(byId('login'))) return 'login';
+                        if (visible(byId('pwd')) && visible(byId('login'))
+                                && /^вход$/i.test(byId('login').textContent.trim())) return 'login';
                         if ((byId('double-val-check')?.type === 'checkbox' && visible(byId('wifiSSID-val')))
                                 || (byId('goPc-close') && byId('goPc-btn0'))
                                 || Array.from(document.querySelectorAll('body *'))
@@ -73,9 +74,13 @@ final class TendaSetup {
                     case 10: {
                         const field = byId('pwd');
                         if (!visible(field) || field.type !== 'password') return 'wait';
-                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, %s);
-                        field.dispatchEvent(new Event('input', {bubbles: true}));
-                        field.dispatchEvent(new Event('change', {bubbles: true}));
+                        const value = %s;
+                        if (field.value !== value) {
+                            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, value);
+                            field.dispatchEvent(new Event('input', {bubbles: true}));
+                            field.dispatchEvent(new Event('change', {bubbles: true}));
+                            return 'wait';
+                        }
                         return click('login', /^вход$/i);
                     }
                     case 11: {
@@ -101,7 +106,7 @@ final class TendaSetup {
                     case 13: {
                         if (!byId('double-val-check')?.checked) return 'wait';
                         const save = Array.from(document.querySelectorAll('button,input[type=submit],a,[role=button]'))
-                            .filter(e => visible(e) && /^сохранить$/i.test((e.value || e.textContent).trim()));
+                            .filter(e => visible(e) && !e.disabled && /^сохранить$/i.test((e.value || e.textContent).trim()));
                         if (save.length !== 1) return 'manual-save';
                         save[0].click();
                         return 'advance';
