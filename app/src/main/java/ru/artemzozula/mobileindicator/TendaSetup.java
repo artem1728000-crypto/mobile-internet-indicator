@@ -126,7 +126,34 @@ final class TendaSetup {
                         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, %s);
                         field.dispatchEvent(new Event('input', {bubbles: true}));
                         field.dispatchEvent(new Event('change', {bubbles: true}));
-                        return 'ax-review';
+                        return 'ssid:' + ssid.value;
+                    }
+                    case 24: {
+                        const pattern = /^настроить пароль wifi как пароль учетной записи роутера$/i;
+                        const matches = e => visible(e) && pattern.test(e.textContent.trim()
+                            .replace(/[\\s-]+/g, ' ').replace(/wi fi/ig, 'wifi').replace(/ё/ig, 'е'));
+                        const label = Array.from(document.querySelectorAll('body *'))
+                            .find(e => matches(e) && !Array.from(e.children).some(matches));
+                        if (!label) return 'ax-review';
+                        const wrapper = label.closest('label,[role=checkbox],[role=switch]');
+                        const input = wrapper?.control || wrapper?.querySelector('input[type=checkbox]');
+                        const accountPassword = byId('login-pwd-val');
+                        if (input?.checked || wrapper?.getAttribute('aria-checked') === 'true'
+                                || (accountPassword && !visible(accountPassword))) return 'advance';
+                        (wrapper || label).click();
+                        return 'advance';
+                    }
+                    case 25: {
+                        const accountPassword = byId('login-pwd-val');
+                        const checked = Array.from(document.querySelectorAll('input[type=checkbox]:checked,[aria-checked=true]'))
+                            .some(e => /пароль.*уч[её]тной записи/i.test(e.closest('label')?.textContent
+                                || e.labels?.[0]?.textContent || e.getAttribute('aria-label') || ''));
+                        if (!checked && (!accountPassword || visible(accountPassword))) return 'ax-review';
+                        const buttons = Array.from(document.querySelectorAll('button,[role=button],input[type=submit]'))
+                            .filter(e => visible(e) && !e.disabled && /^далее$/i.test((e.value || e.textContent).trim()));
+                        if (buttons.length !== 1) return 'wait';
+                        buttons[0].click();
+                        return 'advance';
                     }
                     default:
                         return 'wait';

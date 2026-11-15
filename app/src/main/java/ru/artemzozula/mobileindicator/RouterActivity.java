@@ -34,6 +34,22 @@ public final class RouterActivity extends Activity {
               return JSON.stringify({
                 headings: Array.from(document.querySelectorAll('h1,h2,h3')).slice(0, 40)
                   .map(e => clean(e.textContent)),
+                uiElements: Array.from(document.querySelectorAll('body *')).filter(e => {
+                  if (!e.getClientRects().length || getComputedStyle(e).visibility !== 'visible'
+                      || e.closest('[hidden],[aria-hidden="true"]')) return false;
+                  return e.matches('button,input,select,a,label,[role],[tabindex],[onclick]')
+                    || getComputedStyle(e).cursor === 'pointer'
+                    || Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim());
+                }).slice(0, 450).map(e => ({
+                  tag: e.localName, id: e.id, classes: e.getAttribute('class') || '',
+                  role: e.getAttribute('role') || '', target: e.getAttribute('for') || '',
+                  label: clean(e.getAttribute('aria-label') || e.getAttribute('title')
+                    || Array.from(e.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join(' ')),
+                  checked: typeof e.checked === 'boolean' ? e.checked : e.getAttribute('aria-checked'),
+                  parent: {tag: e.parentElement.localName, id: e.parentElement.id,
+                    classes: e.parentElement.getAttribute('class') || ''},
+                  disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true'
+                })),
                 controls: Array.from(document.querySelectorAll(
                   'input,select,textarea,button,[role=button]')).slice(0, 250).map(e => ({
                     tag: e.tagName.toLowerCase(), type: e.getAttribute('type') || '',
@@ -282,7 +298,7 @@ public final class RouterActivity extends Activity {
         }
         Uri uri = Uri.parse(url);
         String origin = uri.getScheme() + "://" + uri.getEncodedAuthority();
-        applyingTenda = tendaStep == 9 || (directApply && tendaStep == 7);
+        applyingTenda = tendaStep == 25 || tendaStep == 9 || (directApply && tendaStep == 7);
         browser.evaluateJavascript(TendaSetup.script(tendaPassword, origin, tendaStep), result -> {
             if (session != tendaSession || isFinishing() || isDestroyed()) return;
             applyingTenda = false;
@@ -299,7 +315,7 @@ public final class RouterActivity extends Activity {
                 finishTenda("Диапазоны объединены в форме. Нажми «Сохранить» на странице роутера.");
                 return;
             }
-            if (tendaStep == 6 && result != null && result.startsWith("\"ssid:")) {
+            if ((tendaStep == 6 || tendaStep == 23) && result != null && result.startsWith("\"ssid:")) {
                 try {
                     String ssid = ((String) new JSONTokener(result).nextValue()).substring(5);
                     tendaStep++;
@@ -318,8 +334,9 @@ public final class RouterActivity extends Activity {
             if ("\"advance\"".equals(result)) {
                 tendaAttempt = 0;
                 if (directApply && tendaStep == 7) tendaStep = 9;
-                if (++tendaStep == 10 && tendaSsid != null && offerWifiSave(tendaSsid)) return;
-                if (tendaStep == 10 || tendaStep == 14) {
+                ++tendaStep;
+                if ((tendaStep == 10 || tendaStep == 26) && tendaSsid != null && offerWifiSave(tendaSsid)) return;
+                if (tendaStep == 10 || tendaStep == 14 || tendaStep == 26) {
                     finishTenda("Настройки отправлены. После применения подключись к сети 2,4 ГГц.");
                     return;
                 }
@@ -330,7 +347,7 @@ public final class RouterActivity extends Activity {
     }
 
     private boolean offerWifiSave(String ssid) {
-        if (Build.VERSION.SDK_INT < 30 || !ssid.matches("Tenda_[0-9A-Fa-f]{6}")) return false;
+        if (Build.VERSION.SDK_INT < 30 || !ssid.matches("@?Tenda_[0-9A-Fa-f]{6}")) return false;
         try {
             android.net.wifi.WifiNetworkSuggestion suggestion =
                     new android.net.wifi.WifiNetworkSuggestion.Builder().setSsid(ssid)
