@@ -29,6 +29,7 @@ final class TendaSetup {
                                 .some(e => visible(e) && /^настройки\\s+wi[\\s\\u2010-\\u2015-]*fi$/i.test(e.textContent.trim())))
                             return 'settings';
                         if (!visible(byId('start'))) return 'wait';
+                        if (/^начать$/i.test(byId('start').textContent.trim())) return 'ax-wizard';
                         const model = document.body.innerText;
                         if (/\\bRX2\\s*PRO\\b/i.test(model)) return 'rx';
                         if (/\\bTX2L\\s*PRO\\b/i.test(model)) return 'tx';
@@ -111,10 +112,26 @@ final class TendaSetup {
                         save[0].click();
                         return 'advance';
                     }
+                    case 20:
+                        return click('start', /^начать$/i);
+                    case 21:
+                        return click('continue', /продолжить/i);
+                    case 22:
+                        return click('extend-page-skip', /^пропустить$/i);
+                    case 23: {
+                        const ssid = byId('ssid-val'), field = byId('pwd-val');
+                        if (!visible(ssid) || !visible(field) || !(field instanceof HTMLInputElement)
+                                || !/^@Tenda_[0-9a-f]{6}$/i.test(ssid.value)) return 'wait';
+                        if (field.value) return 'password';
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, %s);
+                        field.dispatchEvent(new Event('input', {bubbles: true}));
+                        field.dispatchEvent(new Event('change', {bubbles: true}));
+                        return 'ax-review';
+                    }
                     default:
                         return 'wait';
                 }
             })()
-            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password));
+            """, JSONObject.quote(origin), step, JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password), JSONObject.quote(password));
     }
 }

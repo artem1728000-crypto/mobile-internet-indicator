@@ -187,20 +187,30 @@ public final class RouterActivity extends Activity {
         browser.evaluateJavascript(TendaSetup.script("", origin, -1), result -> {
             if (isFinishing() || isDestroyed() || !url.equals(browser.getUrl()) || tendaPassword != null) return;
             if ("\"login\"".equals(result) || "\"settings\"".equals(result)) {
-                promptTenda(true, false, "\"settings\"".equals(result));
+                boolean signedIn = "\"settings\"".equals(result);
+                new android.app.AlertDialog.Builder(this).setTitle("Модель настроенного Tenda")
+                        .setItems(new String[]{"RX2 Pro / TX2L Pro — объединить диапазоны",
+                                "AX12 Pro — ручная настройка WAN/LAN"}, (dialog, choice) -> {
+                            if (choice == 0) promptTenda(true, false, signedIn, false);
+                            else new android.app.AlertDialog.Builder(this).setTitle("AX12 Pro")
+                                    .setMessage("Войди в роутер и открой веб-версию. В «Сетевых настройках» открой «Автосогласование WAN/LAN» и выключи ползунок. Порт 1 остаётся WAN.")
+                                    .setPositiveButton("ОК", null).show();
+                        }).show();
+            } else if ("\"ax-wizard\"".equals(result)) {
+                promptTenda(false, false, false, true);
             } else if ("\"rx\"".equals(result) || "\"tx\"".equals(result)) {
-                promptTenda(false, "\"rx\"".equals(result), false);
+                promptTenda(false, "\"rx\"".equals(result), false, false);
             } else if ("\"welcome\"".equals(result)) {
                 new android.app.AlertDialog.Builder(this).setTitle("Заводской мастер Tenda")
                         .setItems(new String[]{"RX2 Pro", "TX2L Pro"}, (dialog, choice) ->
-                                promptTenda(false, choice == 0, false)).show();
+                                promptTenda(false, choice == 0, false, false)).show();
             } else {
                 Toast.makeText(this, "Открой приветствие или страницу входа Tenda", Toast.LENGTH_LONG).show();
             }
         });
     }
 
-    private void promptTenda(boolean merge, boolean rx, boolean signedIn) {
+    private void promptTenda(boolean merge, boolean rx, boolean signedIn, boolean ax) {
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
             return;
@@ -215,7 +225,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                ax ? "Отключи WAN. Помощник заполнит пароль. Затем отметь использование пароля Wi-Fi для входа в роутер и нажми «Далее»." : merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
@@ -237,7 +247,7 @@ public final class RouterActivity extends Activity {
             password.setSelection(password.length());
         }), 8);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-                .setTitle(merge ? "Объединение диапазонов Tenda" : rx ? "Настройка Tenda RX2 Pro" : "Настройка Tenda TX2L Pro").setView(content)
+                .setTitle(ax ? "Настройка Tenda AX12 Pro" : merge ? "Объединение диапазонов Tenda" : rx ? "Настройка Tenda RX2 Pro" : "Настройка Tenda TX2L Pro").setView(content)
                 .setNegativeButton("Отмена", null).setPositiveButton("Начать", null).create();
         dialog.show();
         dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
@@ -251,7 +261,7 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             tendaPassword = value;
             tendaAttempt = 0;
-            tendaStep = merge ? (signedIn ? 11 : 10) : 0;
+            tendaStep = ax ? 20 : merge ? (signedIn ? 11 : 10) : 0;
             directApply = rx;
             tendaSsid = null;
             tendaButton.setText("Остановить помощник");
@@ -280,6 +290,10 @@ public final class RouterActivity extends Activity {
                 tendaStep = 9;
                 tendaAttempt = 0;
 
+            }
+            if ("\"ax-review\"".equals(result)) {
+                finishTenda("Пароль заполнен. Включи использование пароля Wi-Fi для учётной записи и нажми «Далее».");
+                return;
             }
             if ("\"manual-save\"".equals(result)) {
                 finishTenda("Диапазоны объединены в форме. Нажми «Сохранить» на странице роутера.");
