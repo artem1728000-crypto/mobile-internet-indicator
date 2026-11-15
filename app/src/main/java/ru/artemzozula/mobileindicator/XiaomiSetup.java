@@ -32,12 +32,15 @@ final class XiaomiSetup {
                   const start = find('a.button', '马上体验');
                   if (start && find('input[name=protocal]')) {
                     const agreement = find('input[name=protocal]'); if (!agreement.checked) agreement.click(); return click('welcome', start);
-                    return 'welcome';
                   }
                   const offline = find('a', '不插网线，继续配置');
                   if (offline && find('h4', '未检测到入户网线')) return click('offline', offline);
-                  const dhcp = find('li.iconfont', '自动获取IP');
-                  if (dhcp && find('h3', '选择配置类型')) return click('dhcp', dhcp);
+                  const dhcp = [...document.querySelectorAll('li,button,a,[role=button]')]
+                      .find(e => visible(e) && /^(自动获取IP|DHCP)(\\s*[(（].*[)）])?$/i.test(
+                          e.textContent.trim().replace(/\\s+/g, ' ')))
+                      || [...document.querySelectorAll('li')].find(e => visible(e)
+                          && e.textContent.replace(/\\s+/g, '').includes('自动获取IP'));
+                  if (dhcp && (find('h3', '选择配置类型') || /PPPoE/i.test(document.body.textContent))) return click('dhcp', dhcp);
 
                   const wifi = find('input[name=password]');
                   if (wifi && find('input[name=name]') && find('input[name=passwd][type=checkbox]')
@@ -76,6 +79,10 @@ final class XiaomiSetup {
                     }
                     const fixedLabel = find('.ipt-text.dummy', '固定WAN口');
                     const port = find('.wanListDiv .portsIndex', '1');
+                    if (expected === 'verify') {
+                      return fixed && mode.value === fixed.value && port
+                          && port.closest('.wanListDiv').classList.contains('active') ? 'wan-confirmed' : 'wan-mismatch';
+                    }
                     if (expected === 'auto') {
                       if (fixedLabel && port && !port.closest('.wanListDiv').classList.contains('active')
                           && find('span', '保存')) port.closest('.wanListDiv').click();
@@ -83,7 +90,6 @@ final class XiaomiSetup {
                           .scrollIntoView({block: 'center'});
                     }
                     if (fixedLabel && port && port.closest('.wanListDiv').classList.contains('active')) {
-                      
                       const save = find('button#btnSubmitwanCheck');
                       if (save && !save.dataset.routerClicked) {
                         save.dataset.routerClicked = '1';

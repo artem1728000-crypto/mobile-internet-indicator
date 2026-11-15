@@ -102,7 +102,7 @@ public final class RouterActivity extends Activity {
                 if (lost.equals(network)) runOnUiThread(() -> {
                     if (isDestroyed() || browser == null) return;
                     routerLost = true;
-                    if (applyingTenda || savingWifi) return;
+                    if (applyingTenda || savingWifi || xiaomiWaiting) return;
                     browser.stopLoading();
                     Toast.makeText(RouterActivity.this, "Связь с роутером потеряна", Toast.LENGTH_LONG).show();
                     finish();
@@ -198,6 +198,10 @@ public final class RouterActivity extends Activity {
 
     private boolean xiaomiRunning;
     private boolean xiaomiPrepared;
+    private boolean xiaomiWaiting;
+    private boolean xiaomiVerifyWan;
+    private String xiaomiSsid;
+    private int xiaomiReconnectAttempts;
     private int xiaomiAttempts;
     private String xiaomiOrigin;
     private String xiaomiPassword;
@@ -205,6 +209,8 @@ public final class RouterActivity extends Activity {
     private void promptXiaomi() {
         if (xiaomiRunning) {
             xiaomiRunning = false;
+            xiaomiWaiting = false;
+            applyingTenda = false;
             return;
         }
         if (tendaPassword != null || savingWifi || routerLost) return;
@@ -213,12 +219,35 @@ public final class RouterActivity extends Activity {
         xiaomiOrigin = url.getScheme() + "://" + url.getEncodedAuthority();
         android.widget.EditText password = new android.widget.EditText(this);
         password.setSingleLine(true);
-        password.setInputType(129);
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        password.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
+        password.setSaveEnabled(false);
+        LinearLayout content = Ui.column(this);
+        Ui.pad(content, 20, 8);
+        Ui.add(content, password, 8);
+        String lastPassword = getPreferences(MODE_PRIVATE).getString("xiaomi_password", "");
+        android.widget.Button reuse = Ui.button(this, "Вставить последний пароль", false, () -> {
+            password.setText(lastPassword);
+            password.setSelection(password.length());
+        });
+        reuse.setEnabled(!lastPassword.isEmpty());
+        Ui.add(content, reuse, 8);
+        Ui.add(content, Ui.button(this, "Сгенерировать пароль", false, () -> {
+            java.security.SecureRandom random = new java.security.SecureRandom();
+            StringBuilder generated = new StringBuilder(8);
+            for (int i = 0; i < 4; i++) {
+                char digit = (char) ('0' + random.nextInt(10));
+                generated.append(digit).append(digit);
+            }
+            password.setText(generated);
+            password.setSelection(password.length());
+        }), 8);
         password.setText(getPreferences(MODE_PRIVATE).getString("xiaomi_password", ""));
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
                 .setTitle("Xiaomi — автоматическая настройка")
                 .setMessage("Пароль Wi-Fi и администратора")
-                .setView(password).setNegativeButton("Отмена", null)
+                .setView(content).setNegativeButton("Отмена", null)
                 .setPositiveButton("Начать", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(-1).setOnClickListener(view -> {
             String value = password.getText().toString();
@@ -231,6 +260,7 @@ public final class RouterActivity extends Activity {
             dialog.dismiss();
             xiaomiRunning = true;
             xiaomiPrepared = false;
+            xiaomiVerifyWan = false;
             xiaomiAttempts = 0;
             runXiaomi();
         }));
@@ -245,12 +275,18 @@ public final class RouterActivity extends Activity {
             return;
         }
         applyingTenda = xiaomiPrepared;
+        if (xiaomiPrepared) {
+            xiaomiWaiting = true;
+            xiaomiReconnectAttempts = 0;
+            browser.postDelayed(this::resumeXiaomiAfterReconnect, 2000);
+        }
         browser.evaluateJavascript(XiaomiSetup.script(xiaomiOrigin, xiaomiPassword,
-                xiaomiPrepared ? "apply" : "auto"), result -> {
+                xiaomiPrepared ? "apply" : xiaomiVerifyWan ? "verify" : "auto"), result -> {
             if (!xiaomiRunning || isFinishing() || isDestroyed()) return;
             if (result != null && result.startsWith("\"ssid:")) {
                 try {
                     String ssid = ((String) new JSONTokener(result).nextValue()).substring(5);
+                    xiaomiSsid = ssid;
                     tendaPassword = xiaomiPassword;
                     xiaomiPrepared = true;
                     if (offerWifiSave(ssid)) return;
@@ -261,21 +297,67 @@ public final class RouterActivity extends Activity {
                 }
             }
             if ("\"applied\"".equals(result)) {
-                xiaomiRunning = false;
                 applyingTenda = true;
-                Toast.makeText(this, "Настройки отправлены. После подключения открой роутер и запусти Xiaomi для настройки WAN.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Ожидаем подключения к настроенной сети. Затем настройка WAN продолжится автоматически.", Toast.LENGTH_LONG).show();
                 return;
             }
             if ("\"wan-saved\"".equals(result)) {
+                xiaomiVerifyWan = true;
+                browser.postDelayed(() -> {
+                    if (!xiaomiRunning || isFinishing() || isDestroyed()) return;
+                    browser.reload();
+                    browser.postDelayed(this::runXiaomi, 2000);
+                }, 3000);
+                return;
+            }
+            if ("\"wan-confirmed\"".equals(result)) {
                 xiaomiRunning = false;
-                Toast.makeText(this, "Настройки фиксированного WAN отправлены.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "WAN-порт 1 закреплён. Можно подключить кабель от оптического терминала.", Toast.LENGTH_LONG).show();
                 return;
             }
             browser.postDelayed(this::runXiaomi, 1000);
         });
     }
 
+    @SuppressWarnings("deprecation")
+    private void resumeXiaomiAfterReconnect() {
+        if (!xiaomiWaiting || !xiaomiRunning || isFinishing() || isDestroyed()) return;
+        if (++xiaomiReconnectAttempts > 180) {
+            xiaomiWaiting = false;
+            xiaomiRunning = false;
+            applyingTenda = false;
+            Toast.makeText(this, "Не удалось дождаться сети Xiaomi. Подключись и запусти помощник повторно.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        for (Network candidate : connectivity.getAllNetworks()) {
+            NetworkCapabilities caps = connectivity.getNetworkCapabilities(candidate);
+            if (candidate.equals(network) || caps == null
+                    || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                    || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                    || !gateway.equals(RouterLink.from(connectivity.getLinkProperties(candidate)).gateway())) continue;
+            android.net.wifi.WifiManager wifi = (android.net.wifi.WifiManager)
+                    getApplicationContext().getSystemService(WIFI_SERVICE);
+            String ssid = wifi.getConnectionInfo().getSSID();
+            if (ssid != null && !ssid.equals("<unknown ssid>")
+                    && !ssid.equals("\"" + xiaomiSsid + "\"") && !ssid.equals(xiaomiSsid)) continue;
+            if (!connectivity.bindProcessToNetwork(candidate)) continue;
+            network = candidate;
+            routerLost = false;
+            applyingTenda = false;
+            xiaomiWaiting = false;
+            xiaomiPrepared = false;
+            xiaomiVerifyWan = false;
+            xiaomiAttempts = 0;
+            browser.stopLoading();
+            browser.loadUrl(xiaomiOrigin + "/");
+            browser.postDelayed(this::runXiaomi, 1500);
+            return;
+        }
+        browser.postDelayed(this::resumeXiaomiAfterReconnect, 2000);
+    }
+
     private void promptTenda() {
+        if (xiaomiRunning) return;
         if (tendaPassword != null) {
             finishTenda("Помощник остановлен.");
             return;

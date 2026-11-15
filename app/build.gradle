@@ -6,8 +6,8 @@ android {
         applicationId 'ru.artemzozula.mobileindicator'
         minSdk 26
         targetSdk 35
-        versionCode 30
-        versionName '2.13.0'
+        versionCode 31
+        versionName '2.13.1'
     }
     signingConfigs {
         release {
