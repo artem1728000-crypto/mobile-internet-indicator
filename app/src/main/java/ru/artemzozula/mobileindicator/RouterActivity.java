@@ -208,7 +208,7 @@ public final class RouterActivity extends Activity {
                 boolean signedIn = "\"settings\"".equals(result);
                 new android.app.AlertDialog.Builder(this).setTitle("Модель настроенного Tenda")
                         .setItems(new String[]{"RX2 Pro / TX2L Pro — объединить диапазоны",
-                                "AX12 Pro — открыть WAN/LAN"}, (dialog, choice) -> {
+                                "AX12 Pro — выключить автосогласование WAN/LAN"}, (dialog, choice) -> {
                             if (choice == 0) promptTenda(true, false, signedIn, false);
                             else promptTenda(false, false, signedIn, true, true);
                         }).show();
@@ -245,7 +245,7 @@ public final class RouterActivity extends Activity {
         LinearLayout content = Ui.column(this);
         Ui.pad(content, 20, 8);
         Ui.add(content, Ui.text(this,
-                wan ? "Введи пароль роутера. Помощник откроет раздел автосогласования WAN/LAN." : ax ? "Отключи WAN. Помощник заполнит пароль. Затем отметь использование пароля Wi-Fi для входа в роутер и нажми «Далее»." : merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
+                wan ? "Введи пароль роутера. Помощник выключит автосогласование WAN/LAN, если оно включено." : ax ? "Отключи WAN. Помощник заполнит пароль. Затем отметь использование пароля Wi-Fi для входа в роутер и нажми «Далее»." : merge ? "Подключись к защищённой сети 2,4 ГГц. Введи пароль Wi-Fi для входа в роутер." : "Подключись к заводской сети Tenda и отключи WAN. Оставь выбранный мастером «Динамический IP-адрес». Помощник заполнит пароль Wi-Fi и применит настройки. Заводская сеть после этого может исчезнуть.",
                 15, Ui.INK, false), 0);
         Ui.add(content, password, 8);
         android.content.SharedPreferences preferences = getSharedPreferences("tenda_setup", MODE_PRIVATE);
@@ -319,8 +319,8 @@ public final class RouterActivity extends Activity {
                 openWan(session);
                 return;
             }
-            if ("\"wan-ready\"".equals(result)) {
-                finishTenda("Раздел WAN/LAN открыт. Ползунок можно выключить вручную.");
+            if ("\"wan-off\"".equals(result)) {
+                finishTenda("Автосогласование WAN/LAN выключено.");
                 return;
             }
             if ("\"ready-to-save\"".equals(result) && tendaStep == 8) {

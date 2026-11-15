@@ -178,8 +178,24 @@ final class TendaSetup {
                     case 32:
                         return document.querySelector('.sub-nav__title') ? 'open-wan' : 'wait';
                     case 34:
-                        return document.querySelector('.page-title')?.textContent.trim() === 'Автосогласование WAN/LAN'
-                            ? 'wan-ready' : 'wait';
+                    case 35: {
+                        const title = 'Автосогласование WAN/LAN';
+                        if (location.hash !== '#/advance/network/auto-detect'
+                                || document.querySelector('.page-title')?.textContent.trim() !== title)
+                            return 'wait';
+                        const items = Array.from(document.querySelectorAll('.v-form-item'))
+                            .filter(e => e.querySelector('.v-form-item__label')?.textContent.trim() === title)
+                            .flatMap(e => Array.from(e.querySelectorAll('.v-switch > .v-switch__item')))
+                            .filter(visible);
+                        if (items.length !== 1) return 'wait';
+                        const toggle = items[0];
+                        const icon = toggle.querySelector('.v-switch__icon');
+                        if (!icon) return 'wait';
+                        if (!icon.classList.contains('v-switch__icon--active')) return 'wan-off';
+                        if (step === 35) return 'wait';
+                        toggle.click();
+                        return 'advance';
+                    }
                     default:
                         return 'wait';
                 }
