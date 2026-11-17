@@ -22,7 +22,7 @@ import java.text.DateFormat;
 import java.util.Date;
 
 public final class MainActivity extends Activity {
-    private TextView transport, headline, detail, external, yandex;
+    private TextView transport, headline, detail, sojka, yandex;
     private LinearLayout hero, wifiCard;
     private TextView wifiSignal, wifiFrequency, wifiChannel, wifiSpeed, wifiAddress;
     private Button wifiGateway;
@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
         Ui.add(hero, detail, 8);
 
         LinearLayout readings = new LinearLayout(this);
-        external = readingCard(readings, "8.8.8.8:53", "Открытие TCP");
+        sojka = readingCard(readings, "Сойка", "Ответ HTTPS");
         yandex = readingCard(readings, "ya.ru", "Ответ HTTPS");
         Ui.add(page, readings, 12);
         wifiCard = Ui.column(this);
@@ -297,7 +297,12 @@ public final class MainActivity extends Activity {
                 + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(new Date(current.checkedAt()))
                 + (current.confirming() ? "\nПроверяем, повторится ли сбой" : "")
                 : enabled ? "Автоматические проверки в фоне" : "Включи наблюдение, чтобы начать замеры");
-        external.setText(measured ? reading(current.externalMs()) : "—");
+        if (measured) {
+            MonitorService.HttpsResult result = current.sojka();
+            sojka.setText(result.responded() ? reading(result.millis()) + "\nHTTP " + result.code() : "Нет ответа");
+        } else {
+            sojka.setText("—");
+        }
         yandex.setText(measured ? reading(current.yandexMs()) : "—");
         check.setEnabled(current != null && !"Нет подключения".equals(current.transport()));
         check.setAlpha(check.isEnabled() ? 1f : .55f);

@@ -17,9 +17,6 @@ import android.os.Looper;
 import android.os.SystemClock;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,18 +27,28 @@ public final class MonitorService extends Service {
     private static final int NOTIFICATION_ID = 1;
     private static final int TIMEOUT_MS = 3000;
     private static final long INTERVAL_MS = 30_000;
+    private static final String SOJKA_URL = "https://sojka.mobiforce.ru/";
+    private static final String YANDEX_URL = "https://ya.ru/";
 
     static final String ACTION_REFRESH = "refresh";
     static final String ACTION_MODE = "mode";
     static Snapshot snapshot;
 
     record Snapshot(String transport, String status, int icon, long checkedAt,
-                    long externalMs, long yandexMs, boolean confirming, String standard, int dbm) {}
+                    HttpsResult sojka, long yandexMs, boolean confirming, String standard, int dbm) {}
+
+    record HttpsResult(int code, long millis) {
+        private static final HttpsResult NO_RESPONSE = new HttpsResult(-1, -1);
+
+        boolean responded() {
+            return code >= 200 && code < 600;
+        }
+    }
 
     private enum Status {
         NONE(R.drawable.ic_none, "Доступ не подтверждён"),
         LIMITED(R.drawable.ic_limited, "Вероятно, белый список"),
-        FULL(R.drawable.ic_full, "Внешний доступ есть"),
+        FULL(R.drawable.ic_full, "Сойка отвечает"),
         CHECKING(R.drawable.ic_checking, "Проверка интернета");
 
         final int icon;
@@ -169,7 +176,7 @@ public final class MonitorService extends Service {
         confirmation = null;
         transport = network == null ? "Нет подключения" : "Определение сети…";
         shown = network == null ? Status.NONE : Status.CHECKING;
-        publish(0, -1, -1);
+        publish(0, HttpsResult.NO_RESPONSE, -1, "", Integer.MAX_VALUE);
         schedule(network == null ? 2500 : 0);
     }
 
@@ -179,7 +186,7 @@ public final class MonitorService extends Service {
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transport = "Мобильная сеть";
         else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transport = "Ethernet";
         else transport = "Другая сеть";
-        publish(snapshot.checkedAt(), snapshot.externalMs(), snapshot.yandexMs(), snapshot.standard(), snapshot.dbm());
+        publish(snapshot.checkedAt(), snapshot.sojka(), snapshot.yandexMs(), snapshot.standard(), snapshot.dbm());
     }
 
     private void schedule(long delay) {
@@ -199,11 +206,10 @@ public final class MonitorService extends Service {
         int probeGeneration = generation;
         runningProbe = true;
         worker.execute(() -> {
-            long started = SystemClock.elapsedRealtime();
-            long externalMs = outsideReachable(network) ? SystemClock.elapsedRealtime() - started : -1;
-            started = SystemClock.elapsedRealtime();
-            long yandexMs = yandexReachable(network) ? SystemClock.elapsedRealtime() - started : -1;
-            Status measured = externalMs >= 0 ? Status.FULL
+            HttpsResult sojka = probeHttps(network, SOJKA_URL);
+            HttpsResult yandex = probeHttps(network, YANDEX_URL);
+            long yandexMs = yandex.responded() && yandex.code() < 500 ? yandex.millis() : -1;
+            Status measured = sojka.responded() ? Status.FULL
                     : yandexMs >= 0 ? Status.LIMITED : Status.NONE;
             main.post(() -> {
                 runningProbe = false;
@@ -227,26 +233,17 @@ public final class MonitorService extends Service {
                             : shown == Status.LIMITED ? HistoryStore.LIMITED : HistoryStore.NONE;
                     history.observe(now, state, standard.isEmpty() ? transport : standard, dbm);
                 }
-                publish(now, externalMs, yandexMs, standard, dbm);
+                publish(now, sojka, yandexMs, standard, dbm);
                 schedule(INTERVAL_MS);
             });
         });
     }
 
-    private static boolean outsideReachable(Network network) {
-        try (Socket socket = network.getSocketFactory().createSocket()) {
-            InetAddress google = InetAddress.getByAddress(new byte[]{8, 8, 8, 8});
-            socket.connect(new InetSocketAddress(google, 53), TIMEOUT_MS);
-            return true;
-        } catch (IOException | SecurityException exception) {
-            return false;
-        }
-    }
-
-    private static boolean yandexReachable(Network network) {
+    private static HttpsResult probeHttps(Network network, String url) {
+        long started = SystemClock.elapsedRealtime();
         HttpsURLConnection connection = null;
         try {
-            connection = (HttpsURLConnection) network.openConnection(new URL("https://ya.ru/"));
+            connection = (HttpsURLConnection) network.openConnection(new URL(url));
             connection.setRequestMethod("HEAD");
             connection.setUseCaches(false);
             connection.setRequestProperty("Connection", "close");
@@ -254,20 +251,16 @@ public final class MonitorService extends Service {
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
             int code = connection.getResponseCode();
-            return code >= 200 && code < 500;
+            return new HttpsResult(code, SystemClock.elapsedRealtime() - started);
         } catch (IOException | SecurityException exception) {
-            return false;
+            return HttpsResult.NO_RESPONSE;
         } finally {
             if (connection != null) connection.disconnect();
         }
     }
 
-    private void publish(long checkedAt, long externalMs, long yandexMs) {
-        publish(checkedAt, externalMs, yandexMs, "", Integer.MAX_VALUE);
-    }
-
-    private void publish(long checkedAt, long externalMs, long yandexMs, String standard, int dbm) {
-        snapshot = new Snapshot(transport, shown.title, shown.icon, checkedAt, externalMs,
+    private void publish(long checkedAt, HttpsResult sojka, long yandexMs, String standard, int dbm) {
+        snapshot = new Snapshot(transport, shown.title, shown.icon, checkedAt, sojka,
                 yandexMs, confirmation != null, standard, dbm);
         notifications.notify(NOTIFICATION_ID, notification(shown));
     }
@@ -299,10 +292,10 @@ public final class MonitorService extends Service {
         }
         String detail;
         switch (status) {
-            case FULL: detail = "Доступен 8.8.8.8:53"; break;
-            case LIMITED: detail = "Яндекс доступен, 8.8.8.8:53 не отвечает"; break;
+            case FULL: detail = "Получен ответ по HTTPS"; break;
+            case LIMITED: detail = "Яндекс доступен, Сойка не отвечает"; break;
             case NONE: detail = selected == null ? "Нет подключения"
-                    : "Яндекс и 8.8.8.8:53 не ответили"; break;
+                    : "Сойка и Яндекс не ответили"; break;
             default: detail = "Ожидание результатов";
         }
         return new Notification.Builder(this, CHANNEL)
